@@ -74,26 +74,34 @@ with pysam.FastxFile(fq_filename) as fin, open(fqout_filename, mode='w') as fout
             countqmulti += 1
             continue
         # skip fastq entry if multiple matches to same motif query direct and reverse complement
+
         if ((len(matchesq1) == 1) and (len(matchesq1rc) == 1)):
             countqqrc += 1
             continue
         if ((len(matchesq2) == 1) and (len(matchesq2rc) == 1)):
             countqqrc += 1
             continue
-        # process motif matches to extract target sequences
+        # or matches to two incompatible motifs
+        if ((len(matchesq1) == 1) and (len(matchesq2rc) == 1)):
+            countqqrc += 1
+            continue
+        if ((len(matchesq2) == 1) and (len(matchesq1rc) == 1)):
+            countqqrc += 1
+            continue
+        # process motif match pairs to extract target sequences
         if ((len(matchesq1) == 1) and (len(matchesq2) == 1)):
             countq1q2 += 1
-            captured_seqstring = str(entry.sequence)[matchesq1[0].end + 1: matchesq2[0].start - 1]
-            captured_qualstring = str(entry.quality)[matchesq1[0].end + 1: matchesq2[0].start - 1]
+            captured_seqstring = str(entry.sequence)[matchesq1[0].end:matchesq2[0].start]
+            captured_qualstring = str(entry.quality)[matchesq1[0].end:matchesq2[0].start]
             if (matchesq2[0].start <= matchesq1[0].end):
                 wrongq2q1 += 1
 
             if (len(captured_seqstring) >= min_length):
                 hit_q1_q2 += 1
                 fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                fout.write(captured_seqstring[0:max_length_index] + '\n')
+                fout.write(captured_seqstring[0:max_length] + '\n')
                 fout.write('+' + '\n')
-                fout.write(captured_qualstring[0:max_length_index] + '\n')
+                fout.write(captured_qualstring[0:max_length] + '\n')
                 continue
             else:
                 hit_but_short_q1_q2 += 1
@@ -101,32 +109,33 @@ with pysam.FastxFile(fq_filename) as fin, open(fqout_filename, mode='w') as fout
         #            break
         if ((len(matchesq1rc) == 1) and (len(matchesq2rc) == 1)):
             countq2rcq1rc += 1
-            captured_seqstring = str(entry.sequence)[matchesq2rc[0].end + 1: matchesq1rc[0].start - 1]
-            captured_qualstring = str(entry.quality)[matchesq2rc[0].end + 1: matchesq1rc[0].start - 1]
+            captured_seqstring = str(entry.sequence)[matchesq2rc[0].end:matchesq1rc[0].start]
+            captured_qualstring = str(entry.quality)[matchesq2rc[0].end:matchesq1rc[0].start]
             if (matchesq1rc[0].start <= matchesq2rc[0].end):
                 wrongq1rcq2rc += 1
             if (len(captured_seqstring) >= min_length):
                 hit_q2rc_q1rc += 1
                 fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                fout.write(captured_seqstring[0:max_length_index] + '\n')
+                fout.write(captured_seqstring[0:max_length] + '\n')
                 fout.write('+' + '\n')
-                fout.write(captured_qualstring[0:max_length_index] + '\n')
+                fout.write(captured_qualstring[0:max_length] + '\n')
                 continue
             else:
                 hit_but_short_q2rc_q1rc += 1
             continue
+        # process single motif matches to extract target sequences
         if (len(matchesq1) == 1):
             countq1 += 1
             captured_seqstring = str(entry.sequence)[
-                                 matchesq1[0].end + 1:]  # nothing after colon indicates end of string
+                                 matchesq1[0].end:]  # nothing after colon indicates end of string
             captured_qualstring = str(entry.quality)[
-                                  matchesq1[0].end + 1:]
+                                  matchesq1[0].end:]
             if (len(captured_seqstring) >= min_length):
                 hit_q1_only += 1
                 fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                fout.write(captured_seqstring[0:max_length_index] + '\n')
+                fout.write(captured_seqstring[0:max_length] + '\n')
                 fout.write('+' + '\n')
-                fout.write(captured_qualstring[0:max_length_index] + '\n')
+                fout.write(captured_qualstring[0:max_length] + '\n')
                 continue
             else:
                 hit_but_short_q1_only += 1
@@ -134,15 +143,15 @@ with pysam.FastxFile(fq_filename) as fin, open(fqout_filename, mode='w') as fout
         if (len(matchesq2rc) == 1):
             countq2rc += 1
             captured_seqstring = str(entry.sequence)[
-                                 matchesq2rc[0].end + 1:]  # nothing after colon indicates end of string
+                                 matchesq2rc[0].end:]  # nothing after colon indicates end of string
             captured_qualstring = str(entry.quality)[
-                                  matchesq2rc[0].end + 1:]
+                                  matchesq2rc[0].end:]
             if (len(captured_seqstring) >= min_length):
                 hit_q2rc_only += 1
                 fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                fout.write(captured_seqstring[0:max_length_index] + '\n')
+                fout.write(captured_seqstring[0:max_length] + '\n')
                 fout.write('+' + '\n')
-                fout.write(captured_qualstring[0:max_length_index] + '\n')
+                fout.write(captured_qualstring[0:max_length] + '\n')
                 continue
             else:
                 hit_but_short_q2rc_only += 1
@@ -150,15 +159,15 @@ with pysam.FastxFile(fq_filename) as fin, open(fqout_filename, mode='w') as fout
         if (len(matchesq1rc) == 1):
             countq1rc += 1
             captured_seqstring = str(entry.sequence)[
-                                 0:matchesq1rc[0].start - 1]  # nothing after colon indicates end of string
+                                 0:matchesq1rc[0].start]  # nothing after colon indicates end of string
             captured_qualstring = str(entry.quality)[
-                                  0:matchesq1rc[0].start - 1]
+                                  0:matchesq1rc[0].start]
             if (len(captured_seqstring) >= min_length):
                 hit_q1rc_only += 1
                 fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                fout.write(captured_seqstring[-(max_length + 1):] + '\n')
+                fout.write(captured_seqstring[-max_length:].translate(trans)[::-1] + '\n')
                 fout.write('+' + '\n')
-                fout.write(captured_qualstring[-(max_length + 1):] + '\n')
+                fout.write(captured_qualstring[-max_length:][::-1] + '\n')
                 continue
             else:
                 hit_but_short_q1rc_only += 1
@@ -166,15 +175,15 @@ with pysam.FastxFile(fq_filename) as fin, open(fqout_filename, mode='w') as fout
         if (len(matchesq2) == 1):
             countq2 += 1
             captured_seqstring = str(entry.sequence)[
-                                 0:matchesq2[0].start - 1]  # nothing after colon indicates end of string
+                                 0:matchesq2[0].start]  # nothing after colon indicates end of string
             captured_qualstring = str(entry.quality)[
-                                  0:matchesq2[0].start - 1]
+                                  0:matchesq2[0].start]
             if (len(captured_seqstring) >= min_length):
                 hit_q2_only += 1
                 fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                fout.write(captured_seqstring[-(max_length + 1):] + '\n')
+                fout.write(captured_seqstring[-max_length:].translate(trans)[::-1] + '\n')
                 fout.write('+' + '\n')
-                fout.write(captured_qualstring[-(max_length + 1):] + '\n')
+                fout.write(captured_qualstring[-max_length:][::-1] + '\n')
                 continue
             else:
                 hit_but_short_q2_only += 1
