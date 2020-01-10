@@ -1,6 +1,8 @@
 from fuzzysearch import find_near_matches
+# import re
 import pysam
 import os
+import ray
 
 trans = str.maketrans('ATGCN', 'TACGN')
 
@@ -12,10 +14,15 @@ dels = 0
 min_length = 20
 max_length = 50
 max_length_index = max_length - 1
-fq_filename = os.path.expanduser("~/Data/PIMMS_redo/PIMMS2_stuff/PIMMS_V1/test.IN.R2.fastq.gz")
+fq_filename = os.path.expanduser("~/Data/PIMMS_redo/PIMMS2_stuff/PIMMS_V1/test.IN.R2.fastq")
+#fq_filename = os.path.expanduser("~/Data/PIMMS_redo/PIMMS2_stuff/Short_read_test_data_for_2.0/PIMMS Data/PIMMS_Test_R1_001.fastq.gz")
 fqout_filename = "test.INPY_sub" + str(subs) + "_min" + str(min_length) + "_max" + str(max_length) + ".R2.fastq"
+#fqout_filename = "PIMMS_Test_1_sub" + str(subs) + "_min" + str(min_length) + "_max" + str(max_length) + ".R1.fastq"
 qry1rc = qry1.translate(trans)[::-1]
 qry2rc = qry2.translate(trans)[::-1]
+
+mergedregex = re.compile('(' + qry1 + ')|(' + qry2 + ')|(' + qry1rc + ')|(' + qry2rc + ')')
+
 print(qry1)
 print(qry1rc)
 print('')
@@ -52,6 +59,10 @@ hit_q2rc_only = 0
 with pysam.FastxFile(fq_filename) as fin, open(fqout_filename, mode='w') as fout:
     for entry in fin:
         count += 1
+        # re_match = mergedregex.findall(entry.sequence)
+        # if (len(re_match) == 0):
+        #     continue
+        ray.init()
         matchesq1 = find_near_matches(qry1, entry.sequence, max_substitutions=subs, max_deletions=dels,
                                       max_insertions=insrt)
         matchesq2 = find_near_matches(qry2, entry.sequence, max_substitutions=subs, max_deletions=dels,
