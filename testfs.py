@@ -1,35 +1,63 @@
 from fuzzysearch import find_near_matches
 import os
+import datetime
 import multiprocessing
-
+import pysam
 from pathlib import Path
 # import re
-import pysam
+
 
 # import ray
 
 from threading import Thread
 
-trans = str.maketrans('ATGCN', 'TACGN')
+pimms_mls = """===========================================================================================================
+Pragmatic Insertional Mutation Mapping system (PIMMS) mapping pipeline
+===========================================================================================================
+       o         o
+       o         o
+      //        //
+     //        //
+   |_||_|    |_||_|   @@@@@  @@@@@@  @@     @@  @@     @@   @@@@@@
+   |@||@|    |@||@|   @@  @@   @@    @@@@ @@@@  @@@@ @@@@  @@
+   |@||@|    |@||@|   @@@@@    @@    @@ @@@ @@  @@ @@@ @@   @@@
+   |@||@|    |@||@|   @@       @@    @@  @  @@  @@  @  @@     @@@
+   |@@@@|    |@@@@|   @@       @@    @@     @@  @@     @@       @@
+   |@@@@|    |@@@@|   @@     @@@@@@  @@     @@  @@     @@  @@@@@@@
+===========================================================================================================
+python PIMMS test script.....
+===========================================================================================================\n"""
+
+print(pimms_mls)
+
+trans = str.maketrans('ATGCN', 'TACGN')  # complement DNA lookup
+
+contam1 = 'GATGCTCTAGAGCATTCTCT'
+contam2 = 'CATTCTCTCCATCAAGCTAT'
+contam1rc = contam1.translate(trans)[::-1]  # reverse complement ([::-1] -> reverse)
+contam2rc = contam2.translate(trans)[::-1]
 
 qry1 = "TCAGAAAACTTTGCAACAGAACC"
 qry2 = "GGTTCTGTTGCAAAGTTTAAAAA"
+qry1rc = qry1.translate(trans)[::-1]  # reverse complement ([::-1] -> reverse)
+qry2rc = qry2.translate(trans)[::-1]
 subs = 0
 insrt = 0
 dels = 0
-min_length = 20
+min_length = 25
 max_length = 50
 max_length_index = max_length - 1
 fq1_filename = os.path.expanduser("~/Data/PIMMS_redo/PIMMS2_stuff/PIMMS_V1/test.IN.R1.fastq")
 fq2_filename = os.path.expanduser("~/Data/PIMMS_redo/PIMMS2_stuff/PIMMS_V1/test.IN.R2.fastq")
-fqout_stem = "test.IN.PIMMS"
-# fq_filename = os.path.expanduser("~/Data/PIMMS_redo/PIMMS2_stuff/Short_read_test_data_for_2.0/PIMMS Data/PIMMS_Test_R1_001.fastq.gz")
+fqout_stem = "test.IN.PIMMS_rmIS"
+# fqout_stem = "PIMMS_Test"
+# fq1_filename = os.path.expanduser("~/Data/PIMMS_redo/PIMMS2_stuff/Short_read_test_data_for_2.0/PIMMS Data/PIMMS_Test_R1_001.fastq.gz")
+# fq2_filename = os.path.expanduser("~/Data/PIMMS_redo/PIMMS2_stuff/Short_read_test_data_for_2.0/PIMMS Data/PIMMS_Test_R2_001.fastq.gz")
 fqout1_filename = fqout_stem + ".R1.sub" + str(subs) + "_min" + str(min_length) + "_max" + str(max_length) + ".fastq"
 fqout2_filename = fqout_stem + ".R2.sub" + str(subs) + "_min" + str(min_length) + "_max" + str(max_length) + ".fastq"
 fqoutm_filename = fqout_stem + ".RX.sub" + str(subs) + "_min" + str(min_length) + "_max" + str(max_length) + ".fastq"
 # fqout_filename = "PIMMS_Test_1_sub" + str(subs) + "_min" + str(min_length) + "_max" + str(max_length) + ".R1.fastq"
-qry1rc = qry1.translate(trans)[::-1]
-qry2rc = qry2.translate(trans)[::-1]
+
 
 # mergedregex = re.compile('(' + qry1 + ')|(' + qry2 + ')|(' + qry1rc + ')|(' + qry2rc + ')')
 
@@ -39,7 +67,8 @@ print('')
 print(qry2)
 print(qry2rc)
 print('')
-
+print(str(
+    datetime.datetime.now()) + "\tFinding PIMMS insertion flanking matches...\nfq1:\t" + fq1_filename + "\nfq2:\t" + fq2_filename + "\n")
 
 # count = 0
 # countq1 = 0
@@ -99,13 +128,37 @@ def pimms_fastq(fq_filename, fqout_filename):
     hit_q2_only = 0
     hit_but_short_q2rc_only = 0
     hit_q2rc_only = 0
+    is_contam = 0
 
     with pysam.FastxFile(fq_filename) as fin, open(fqout_filename, mode='w') as fout:
         for entry in fin:
             count += 1
-            # re_match = mergedregex.findall(entry.sequence)
-            # if (len(re_match) == 0):
-            #     continue
+            matchescontam1 = find_near_matches(contam1, entry.sequence, max_substitutions=0, max_deletions=0,
+                                               max_insertions=0)
+            matchescontam2 = find_near_matches(contam2, entry.sequence, max_substitutions=0, max_deletions=0,
+                                               max_insertions=0)
+            matchescontam1rc = find_near_matches(contam1rc, entry.sequence, max_substitutions=0, max_deletions=0,
+                                                 max_insertions=0)
+            matchescontam2rc = find_near_matches(contam2rc, entry.sequence, max_substitutions=0, max_deletions=0,
+                                                 max_insertions=0)
+
+            if matchescontam1:
+                is_contam += 1
+                continue
+
+            if matchescontam2:
+                is_contam += 1
+                continue
+
+            if matchescontam1rc:
+                is_contam += 1
+                continue
+
+            if matchescontam2rc:
+                is_contam += 1
+                continue
+
+
 
             matchesq1 = find_near_matches(qry1, entry.sequence, max_substitutions=subs, max_deletions=dels,
                                           max_insertions=insrt)
@@ -116,7 +169,6 @@ def pimms_fastq(fq_filename, fqout_filename):
             matchesq2rc = find_near_matches(qry2rc, entry.sequence, max_substitutions=subs, max_deletions=dels,
                                             max_insertions=insrt)
 
-            #
 
             # matchesq1 = ray.get(rrfind_near_matches.remote(qry1, entry.sequence))
             # #print(matchesqxx)
@@ -280,7 +332,7 @@ def pimms_fastq(fq_filename, fqout_filename):
 
 # pimms_fastq(fq1_filename, fqout1_filename)
 # pimms_fastq(fq2_filename, fqout2_filename)
-
+print(datetime.datetime.now())
 p1 = multiprocessing.Process(target=pimms_fastq, args=(fq1_filename, fqout1_filename,))
 p2 = multiprocessing.Process(target=pimms_fastq, args=(fq2_filename, fqout2_filename,))
 
@@ -294,49 +346,43 @@ p1.join()
 # wait until process 2 is finished
 p2.join()
 
+print(datetime.datetime.now())
+
 result1_reads_list = []
 result2_reads_list = []
+result1_reads_dict = {}
+result2_reads_dict = {}
 
 
-def survey_fastq(resultx_reads_list, fqout):
+def survey_fastq(resultx_reads_list, resultx_reads_dict, fqout):
     with pysam.FastxFile(fqout) as fh:
         for entry in fh:
             resultx_reads_list.append(entry.name)
+            resultx_reads_dict[entry.name] = len(str(entry.sequence))
 
 
-survey_fastq(result1_reads_list, fqout1_filename)
-survey_fastq(result2_reads_list, fqout2_filename)
+survey_fastq(result1_reads_list, result1_reads_dict, fqout1_filename)
+survey_fastq(result2_reads_list, result2_reads_dict, fqout2_filename)
 
-o1 = multiprocessing.Process(target=survey_fastq, args=(result1_reads_list, fqout1_filename,))
-o2 = multiprocessing.Process(target=survey_fastq, args=(result2_reads_list, fqout2_filename,))
-#
-# # # starting process 1
-# o1.start()
-# # # starting process 2
-# o2.start()
-# #
-# # # wait until process 1 is finished
-# o1.join()
-# # # wait until process 2 is finished
-# o2.join()
-#
-# # with pysam.FastxFile(fqout2_filename) as fh:
-#     for entry in fh:
-#         result2_reads_list.append(entry.name)
-#
-#
 # ## deduplicate the resulting fq files and merge into one
 a = set(result1_reads_list)
 b = set(result2_reads_list)
 c = b.difference(a)
-print(str(len(a)))
-print(str(len(b)))
-print(str(len(c)))
+u = a.union(b)
+# print(str(len(a)))
+# print(str(len(b)))
+# print(str(len(c)))
+# print(str(len(u)))
 #
+
+
+
+
 # with pysam.FastxFile(fqout2_filename) as fin, open(fqoutm_filename, mode='w') as fout:
 #     for entry in fin:
 #         if entry.name in c:
 #             fout.write(str(entry))
+
 
 with pysam.FastxFile(fqout2_filename) as fin, open(fqoutm_filename, mode='w') as fout:
     for entry in fin:
@@ -346,3 +392,6 @@ with pysam.FastxFile(fqout2_filename) as fin, open(fqoutm_filename, mode='w') as
 with pysam.FastxFile(fqout1_filename) as fin, open(fqoutm_filename, mode='a') as fout:
     for entry in fin:
         fout.write(str(entry) + '\n')
+
+print(str(datetime.datetime.now()) + "\tPIMMS insertion flanking matches\tfq1:" + str(len(a)) + "\tfq2:" + str(len(b)) +
+      "\tcombined(non redundant):" + str(len(u)) + "\tnon overlapping:" + str(len(c)) + "\n")
