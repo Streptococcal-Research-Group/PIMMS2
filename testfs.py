@@ -13,26 +13,51 @@ from pathlib import Path
 from threading import Thread
 
 pimms_mls = """===========================================================================================================
-Pragmatic Insertional Mutation Mapping system (PIMMS) mapping pipeline
+Pragmatic Insertional Mutation Mapping system 2 (PIMMS2) mapping pipeline
 ===========================================================================================================
        o         o
        o         o
       //        //
      //        //
-   |_||_|    |_||_|   @@@@@  @@@@@@  @@     @@  @@     @@   @@@@@@
-   |@||@|    |@||@|   @@  @@   @@    @@@@ @@@@  @@@@ @@@@  @@
-   |@||@|    |@||@|   @@@@@    @@    @@ @@@ @@  @@ @@@ @@   @@@
-   |@||@|    |@||@|   @@       @@    @@  @  @@  @@  @  @@     @@@
-   |@@@@|    |@@@@|   @@       @@    @@     @@  @@     @@       @@
-   |@@@@|    |@@@@|   @@     @@@@@@  @@     @@  @@     @@  @@@@@@@
+   |_||_|    |_||_|   @@@@@  @@@@@@  @@     @@  @@     @@   @@@@@@    @@@@@@
+   |@||@|    |@||@|   @@  @@   @@    @@@@ @@@@  @@@@ @@@@  @@        @@    @@
+   |@||@|    |@||@|   @@@@@    @@    @@ @@@ @@  @@ @@@ @@   @@@           @@
+   |@||@|    |@||@|   @@       @@    @@  @  @@  @@  @  @@     @@@        @@
+   |@@@@|    |@@@@|   @@       @@    @@     @@  @@     @@       @@     @@
+   |@@@@|    |@@@@|   @@     @@@@@@  @@     @@  @@     @@  @@@@@@@   @@@@@@@@
 ===========================================================================================================
 python PIMMS test script.....
 ===========================================================================================================\n"""
 
 print(pimms_mls)
 
-nano = True
+nano = False
 decontam_tranposon = False
+
+if decontam_tranposon == False:
+    decon_tag = "nodecon"
+else:
+    decon_tag = "decon"
+
+# fq_result_suffix = "_pimmsout_trim100_nodecon.fastq"
+
+if nano == True:
+    subs = 1
+    insrt = 1
+    dels = 1
+    min_length = 25
+    max_length = 120
+else:
+    subs = 1
+    insrt = 0
+    dels = 0
+    min_length = 25
+    max_length = 50
+
+# min_length = 25
+# max_length = 120
+ncpus = 6
+fq_result_suffix = ("_pimmsout_trim" + str(max_length) + "_" + decon_tag + ".fastq")
 
 trans = str.maketrans('ATGCN', 'TACGN')  # complement DNA lookup
 
@@ -45,11 +70,7 @@ qry1 = "TCAGAAAACTTTGCAACAGAACC"
 qry2 = "GGTTCTGTTGCAAAGTTTAAAAA"
 qry1rc = qry1.translate(trans)[::-1]  # reverse complement ([::-1] -> reverse)
 qry2rc = qry2.translate(trans)[::-1]
-subs = 1
-insrt = 1
-dels = 1
-min_length = 25
-max_length = 80
+
 max_length_index = max_length - 1
 # fq1_filename = os.path.expanduser("~/Data/PIMMS_redo/PIMMS2_stuff/PIMMS_V1/test.IN.R1.fastq")
 # fq2_filename = os.path.expanduser("~/Data/PIMMS_redo/PIMMS2_stuff/PIMMS_V1/test.IN.R2.fastq")
@@ -63,8 +84,10 @@ fq2_filename = os.path.expanduser(
 # FAL74897_pass_barcode08_d9afbb31_all.fastq.gz
 # FAL74897_pass_barcode07_d9afbb31_all.fastq.gz
 # fqout_stem = "test.IN.PIMMS_rmIS"
+# fastq_dir = os.path.expanduser(
+#    "~/Data/PIMMS_redo/PIMMS2_DEMO_DATA_JAN2020/Long_read_test_data_for_2.0/Native_PIMMS/UK15_Media_Input/barcode08/")
 fastq_dir = os.path.expanduser(
-    "~/Data/PIMMS_redo/PIMMS2_DEMO_DATA_JAN2020/Long_read_test_data_for_2.0/Native_PIMMS/UK15_Media_Input/barcode08/")
+    "~/Data/PIMMS_redo/PIMMS2_DEMO_DATA_JAN2020/Short_read_test_data_for_2.0/PIMMS_Data/UK15_Media_Input/10k_test/")
 # fastq_dir = "~/Data/PIMMS_redo/PIMMS2_DEMO_DATA_JAN2020/Long_read_test_data_for_2.0/Native_PIMMS/UK15_Media_Input/"
 
 fqout_stem = "PIMMS2_Test_fastp"
@@ -386,81 +409,78 @@ def survey_fastq(resultx_reads_list, resultx_reads_dict, fqout):
             resultx_reads_dict[entry.name] = len(str(entry.sequence))
 
 
-if nano == False:
-    p1 = multiprocessing.Process(target=pimms_fastq, args=(fq1_filename, fqout1_filename,))
-    p2 = multiprocessing.Process(target=pimms_fastq, args=(fq2_filename, fqout2_filename,))
-
-    # starting process 1
-    p1.start()
-    # starting process 2
-    p2.start()
-
-    # wait until process 1 is finished
-    p1.join()
-    # wait until process 2 is finished
-    p2.join()
-
-    print(datetime.datetime.now())
-
-    result1_reads_list = []
-    result2_reads_list = []
-    result1_reads_dict = {}
-    result2_reads_dict = {}
-
-    survey_fastq(result1_reads_list, result1_reads_dict, fqout1_filename)
-    survey_fastq(result2_reads_list, result2_reads_dict, fqout2_filename)
-
-    # ## deduplicate the resulting fq files and merge into one
-    a = set(result1_reads_list)
-    b = set(result2_reads_list)
-    c = b.difference(a)
-    u = a.union(b)
-    # print(str(len(a)))
-    # print(str(len(b)))
-    # print(str(len(c)))
-    # print(str(len(u)))
-    #
-
+# if nano == False:
+# p1 = multiprocessing.Process(target=pimms_fastq, args=(fq1_filename, fqout1_filename,))
+# p2 = multiprocessing.Process(target=pimms_fastq, args=(fq2_filename, fqout2_filename,))
+#
+# # starting process 1
+# p1.start()
+# # starting process 2
+# p2.start()
+#
+# # wait until process 1 is finished
+# p1.join()
+# # wait until process 2 is finished
+# p2.join()
+#
+# print(datetime.datetime.now())
+#
+# result1_reads_list = []
+# result2_reads_list = []
+# result1_reads_dict = {}
+# result2_reads_dict = {}
+#
+# survey_fastq(result1_reads_list, result1_reads_dict, fqout1_filename)
+# survey_fastq(result2_reads_list, result2_reads_dict, fqout2_filename)
+#
+# # ## deduplicate the resulting fq files and merge into one
+# a = set(result1_reads_list)
+# b = set(result2_reads_list)
+# c = b.difference(a)
+# u = a.union(b)
+# # print(str(len(a)))
+# # print(str(len(b)))
+# # print(str(len(c)))
+# # print(str(len(u)))
+# #
+#
+#
     # with pysam.FastxFile(fqout2_filename) as fin, open(fqoutm_filename, mode='w') as fout:
     #     for entry in fin:
     #         if entry.name in c:
-    #             fout.write(str(entry))
+#             fout.write(str(entry) + '\n')
+#
+# with pysam.FastxFile(fqout1_filename) as fin, open(fqoutm_filename, mode='a') as fout:
+#     for entry in fin:
+#         fout.write(str(entry) + '\n')
+#
+# print(str(datetime.datetime.now()) + "\tPIMMS insertion flanking matches\tfq1:" + str(len(a)) + "\tfq2:" + str(
+#     len(b)) +
+#       "\tcombined(non redundant):" + str(len(u)) + "\tnon overlapping:" + str(len(c)) + "\n")
 
-    with pysam.FastxFile(fqout2_filename) as fin, open(fqoutm_filename, mode='w') as fout:
-        for entry in fin:
-            if entry.name in c:
-                fout.write(str(entry) + '\n')
 
-    with pysam.FastxFile(fqout1_filename) as fin, open(fqoutm_filename, mode='a') as fout:
-        for entry in fin:
-            fout.write(str(entry) + '\n')
+if nano == False:
+    print(datetime.datetime.now())
+    pi = multiprocessing.Pool(ncpus)
+    for fq in glob.glob(fastq_dir + "*q.gz"):
+        pi.apply_async(pimms_fastq,
+                       args=(fq, (os.path.splitext(os.path.splitext(fq)[0])[0] + fq_result_suffix)))
 
-    print(str(datetime.datetime.now()) + "\tPIMMS insertion flanking matches\tfq1:" + str(len(a)) + "\tfq2:" + str(
-        len(b)) +
-          "\tcombined(non redundant):" + str(len(u)) + "\tnon overlapping:" + str(len(c)) + "\n")
-
+    pi.close()
+    pi.join()
+    print("illumina initial PIMMS filtering completed...\n")
+    print(datetime.datetime.now())
 
 elif nano == True:
     print(datetime.datetime.now())
-    pn = multiprocessing.Pool(6)
-    for fq in glob.glob(fastq_dir + "*.gz"):
+    pn = multiprocessing.Pool(ncpus)
+    for fq in glob.glob(fastq_dir + "*q.gz"):
         pn.apply_async(pimms_fastq,
-                       args=(fq, (os.path.splitext(os.path.splitext(fq)[0])[0] + "_pimmsout_trim80_nodecon.fastq")))
-        # fq_out = (os.path.splitext(os.path.splitext(fq)[0])[0] + "_pimmsout.fastq")
+                       args=(fq, (os.path.splitext(os.path.splitext(fq)[0])[0] + fq_result_suffix)))
 
-    # r = pn.apply_async(list, args=(['## ' + fq + "\n"]))
-    # print(r.get())
-
-    # p1 = multiprocessing.Process(target=pimms_fastq, args=(fq1_filename, fqout1_filename,))
-    #
-    # # starting process 1
-    # p1.start()
-    #
-    # # wait until process 1 is finished
-    # p1.join()
-    # print("nanopore...\n")
     pn.close()
     pn.join()
+    print("nanopore PIMMS filtering completed...\n")
     print(datetime.datetime.now())
 
 #    result1_reads_list = []
