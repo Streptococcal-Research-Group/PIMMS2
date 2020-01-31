@@ -87,7 +87,7 @@ fq2_filename = os.path.expanduser(
 # fastq_dir = os.path.expanduser(
 #    "~/Data/PIMMS_redo/PIMMS2_DEMO_DATA_JAN2020/Long_read_test_data_for_2.0/Native_PIMMS/UK15_Media_Input/barcode08/")
 fastq_dir = os.path.expanduser(
-    "~/Data/PIMMS_redo/PIMMS2_DEMO_DATA_JAN2020/Short_read_test_data_for_2.0/PIMMS_Data/UK15_Media_Input/10k_test/")
+    "~/Data/PIMMS_redo/PIMMS2_DEMO_DATA_JAN2020/Short_read_test_data_for_2.0/PIMMS_Data/UK15_Media_Input/")
 # fastq_dir = "~/Data/PIMMS_redo/PIMMS2_DEMO_DATA_JAN2020/Long_read_test_data_for_2.0/Native_PIMMS/UK15_Media_Input/"
 
 fqout_stem = "PIMMS2_Test_fastp"
@@ -402,11 +402,12 @@ def pimms_fastq(fq_filename, fqout_filename):
 #     for listitem in reject_reads_list:
 #         filehandle.write('%s\n' % listitem)
 
-def survey_fastq(resultx_reads_list, resultx_reads_dict, fqout):
+# def survey_fastq(resultx_reads_list, resultx_reads_dict, fqout):
+def survey_fastq(resultx_reads_list, fqout):
     with pysam.FastxFile(fqout) as fh:
         for entry in fh:
             resultx_reads_list.append(entry.name)
-            resultx_reads_dict[entry.name] = len(str(entry.sequence))
+            #resultx_reads_dict[entry.name] = len(str(entry.sequence))
 
 
 # if nano == False:
@@ -460,16 +461,49 @@ def survey_fastq(resultx_reads_list, resultx_reads_dict, fqout):
 
 
 if nano == False:
-    print(datetime.datetime.now())
-    pi = multiprocessing.Pool(ncpus)
-    for fq in glob.glob(fastq_dir + "*q.gz"):
-        pi.apply_async(pimms_fastq,
-                       args=(fq, (os.path.splitext(os.path.splitext(fq)[0])[0] + fq_result_suffix)))
+    # print(datetime.datetime.now())
+    # pi = multiprocessing.Pool(ncpus)
+    # for fq in glob.glob(fastq_dir + "*q.gz"):
+    #     pi.apply_async(pimms_fastq,
+    #                    args=(fq, (os.path.splitext(os.path.splitext(fq)[0])[0] + fq_result_suffix)))
+    #
+    # pi.close()
+    # pi.join()
+    # print("illumina initial PIMMS filtering completed...\n")
+    # print(datetime.datetime.now())
 
-    pi.close()
-    pi.join()
-    print("illumina initial PIMMS filtering completed...\n")
-    print(datetime.datetime.now())
+    fqp_results_fwd = sorted(glob.glob(fastq_dir + "*_R1_*" + fq_result_suffix))
+    fqp_results_rev = sorted(glob.glob(fastq_dir + "*_R2_*" + fq_result_suffix))
+    # print(fqp_results_fwd)
+    import re
+
+    for fwd_fqp_result, rev_fqp_result in zip(fqp_results_fwd, fqp_results_rev):
+        result1_reads_list = []
+        result2_reads_list = []
+        print(fwd_fqp_result)
+        print(rev_fqp_result)
+        survey_fastq(result1_reads_list, fwd_fqp_result)
+        survey_fastq(result2_reads_list, rev_fqp_result)
+        a = set(result1_reads_list)
+        b = set(result2_reads_list)
+        c = b.difference(a)
+
+        mrg_fqp_result_filename = re.sub('_R1_', '_RX_', fwd_fqp_result, count=1)
+        print(mrg_fqp_result_filename)
+        print(str(len(a)))
+        print(str(len(b)))
+        print(str(len(c)))
+
+        with pysam.FastxFile(fwd_fqp_result) as fin, open(mrg_fqp_result_filename, mode='w') as fout:
+            for entry in fin:
+                fout.write(str(entry) + '\n')
+
+        with pysam.FastxFile(rev_fqp_result) as fin, open(mrg_fqp_result_filename, mode='a') as fout:
+            for entry in fin:
+                if entry.name in c:
+                    fout.write(str(entry) + '\n')
+
+
 
 elif nano == True:
     print(datetime.datetime.now())
