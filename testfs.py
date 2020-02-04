@@ -1,16 +1,26 @@
+from argparse import _SubParsersAction
+import pathlib
 from fuzzysearch import find_near_matches
 import os
+import time
+import sys
+import argparse
+import gzip
 import datetime
 import multiprocessing
 import glob
 import pysam
 from pathlib import Path
+
+
 # import re
+def createFolder(directory):
+    try:
+        if not os.path.exists(directory):
+            os.makedirs(directory)
+    except OSError:
+        print('Error: Creating directory. ' + directory)
 
-
-# import ray
-
-from threading import Thread
 
 pimms_mls = """===========================================================================================================
 Pragmatic Insertional Mutation Mapping system 2 (PIMMS2) mapping pipeline
@@ -29,10 +39,68 @@ Pragmatic Insertional Mutation Mapping system 2 (PIMMS2) mapping pipeline
 python PIMMS test script.....
 ===========================================================================================================\n"""
 
+# Construct the argument parser
+ap = argparse.ArgumentParser(description='PIMMS2 fastq sequence processing', prog="demo_pimms2",
+                             epilog="\n\n*** N.B. This is a development version ***\n \n ")
+modes: _SubParsersAction = ap.add_subparsers()
+# modes.required = False
+findflank = modes.add_parser("find_flank", help="Mode: filter fastq files to find insertion site flanking sequence")
+samcoords = modes.add_parser("sam_extract", help="Mode: extract insertion site coordinates from sam file")
+otherstuff = modes.add_parser("other_stuff", help='Mode: do other good PIMMS related stuff')
+# Add the arguments to the parser
+findflank.add_argument('-v', '--version', action='version', version='%(prog)s 0.0.2',
+                       help="version")
+findflank.add_argument("--ont", required=False, action='store_true',
+                       help="nanopore reads [default: illumina paired end]")
+findflank.add_argument("--single", required=False, action='store_true',
+                       help="illumina single end reads (un-paired) [default: illumina paired end]")
+findflank.add_argument("--rmvector", required=False, action='store_true',
+                       help="attempt removal of contaminating vector")
+
+findflank.add_argument("--lev", required=False, action='store_true',
+                       help="use Levenshtein distance of 1")
+findflank.add_argument("-d", "--dir", required=False, nargs=1, dest='in_dir',
+                       help="directory containing input fastq files")
+findflank.add_argument("-r", "--rdir", required=False, nargs=1, metavar='DIR', dest='out_dir',  # action='store',
+                       default=(['pimms2_' + time.strftime("%Y%m%d_%H%M%S")]),
+                       help="directory to contain fastq files results")
+findflank.add_argument("--max", required=False, nargs=1, type=int,
+                       help="clip results to this length [illumina:60/nano:100")
+findflank.add_argument("--config", required=False, nargs=1,
+                       help="read parameters from config file")
+samcoords.add_argument("-s", "--sam", required=False, nargs=1,
+                       help="sam file of mapped IS flanking sequences")
+
+samcoords.add_argument("--config", required=False, nargs=1,
+                       help="read parameters from config file")
+otherstuff.add_argument("--config", required=False, nargs=1,
+                        help="read parameters from config file")
+
+if len(sys.argv) < 2:
+    ap.print_usage()
+    sys.exit(1)
+
+# args = vars(ap.parse_args())
+
+parsed_args = ap.parse_args()
+
+# print((vars(parsed_args)['out_dir']))
+out_dir: object = vars(parsed_args)['out_dir'][0]
+
+if os.path.isdir(out_dir):
+    print('result dir exists\n')
+else:
+    print('creating result dir: ' + out_dir + '\n')
+    createFolder(out_dir)
+
+# exit(0)
+
 print(pimms_mls)
 
+ncpus = 6
 nano = False
 decontam_tranposon = False
+fuzzy_levenshtein = False
 
 if decontam_tranposon == False:
     decon_tag = "nodecon"
@@ -41,23 +109,25 @@ else:
 
 # fq_result_suffix = "_pimmsout_trim100_nodecon.fastq"
 
-if nano == True:
+if nano:  # nano == True
     subs = 1
+    l_dist = 1  # maximum Levenshtein Distance
     insrt = 1
     dels = 1
     min_length = 25
     max_length = 120
 else:
     subs = 1
+    l_dist = 1  # maximum Levenshtein Distance
     insrt = 0
     dels = 0
     min_length = 25
-    max_length = 50
+    max_length = 60
 
 # min_length = 25
 # max_length = 120
-ncpus = 6
-fq_result_suffix = ("_pimmsout_trim" + str(max_length) + "_" + decon_tag + ".fastq")
+
+fq_result_suffix = ("_pimms2out_trim" + str(max_length) + "_" + decon_tag + ".fastq")
 
 trans = str.maketrans('ATGCN', 'TACGN')  # complement DNA lookup
 
@@ -86,11 +156,17 @@ fq2_filename = os.path.expanduser(
 # fqout_stem = "test.IN.PIMMS_rmIS"
 # fastq_dir = os.path.expanduser(
 #    "~/Data/PIMMS_redo/PIMMS2_DEMO_DATA_JAN2020/Long_read_test_data_for_2.0/Native_PIMMS/UK15_Media_Input/barcode08/")
-fastq_dir = os.path.expanduser(
-    "~/Data/PIMMS_redo/PIMMS2_DEMO_DATA_JAN2020/Short_read_test_data_for_2.0/PIMMS_Data/UK15_Media_Input/")
+# use of os.path.join here checks and if needed adds a final path separator "/'
+# fastq_dir = os.path.join(os.path.expanduser(
+#    "~/Data/PIMMS_redo/PIMMS2_DEMO_DATA_JAN2020/Short_read_test_data_for_2.0/PIMMS_Data/UK15_Media_Input"), "")
 # fastq_dir = "~/Data/PIMMS_redo/PIMMS2_DEMO_DATA_JAN2020/Long_read_test_data_for_2.0/Native_PIMMS/UK15_Media_Input/"
+# fastq_dir = os.path.join("/Users/svzaw/Data/PIMMS_redo/PIMMS2_DEMO_DATA_JAN2020/Short_read_test_data_for_2.0/PIMMS_Data/UK15_Media_Input", '')
+fastq_dir = os.path.join(
+    "/Users/svzaw/Data/PIMMS_redo/PIMMS2_DEMO_DATA_JAN2020/Short_read_test_data_for_2.0/PIMMS_Data/UK15_Blood_Output",
+    '')
+# fastq_dir = os.path.join("pimms1_illpe_100k", '')
 
-fqout_stem = "PIMMS2_Test_fastp"
+fqout_stem = "PIMMS2_Test"
 # fq1_filename = os.path.expanduser("~/Data/PIMMS_redo/PIMMS2_stuff/Short_read_test_data_for_2.0/PIMMS Data/PIMMS_Test_R1_001.fastq.gz")
 # fq2_filename = os.path.expanduser("~/Data/PIMMS_redo/PIMMS2_stuff/Short_read_test_data_for_2.0/PIMMS Data/PIMMS_Test_R2_001.fastq.gz")
 fqout1_filename = fqout_stem + ".R1.sub" + str(subs) + "_min" + str(min_length) + "_max" + str(max_length) + ".fastq"
@@ -172,6 +248,7 @@ def pimms_fastq(fq_filename, fqout_filename):
     hit_q2rc_only = 0
     is_contam = 0
     reject_reads_list = []
+    #   with pysam.FastxFile(fq_filename) as fin, gzip.open(fqout_filename + '.gz', mode='wb') as fout:
     with pysam.FastxFile(fq_filename) as fin, open(fqout_filename, mode='w') as fout:
         for entry in fin:
             count += 1
@@ -209,20 +286,21 @@ def pimms_fastq(fq_filename, fqout_filename):
                     reject_reads_list.append(entry.name)
                     continue
 
-            matchesq1 = find_near_matches(qry1, entry.sequence, max_substitutions=subs, max_deletions=dels,
-                                          max_insertions=insrt)
-            matchesq2 = find_near_matches(qry2, entry.sequence, max_substitutions=subs, max_deletions=dels,
-                                          max_insertions=insrt)
-            matchesq1rc = find_near_matches(qry1rc, entry.sequence, max_substitutions=subs, max_deletions=dels,
-                                            max_insertions=insrt)
-            matchesq2rc = find_near_matches(qry2rc, entry.sequence, max_substitutions=subs, max_deletions=dels,
-                                            max_insertions=insrt)
+            if fuzzy_levenshtein == False:
+                matchesq1 = find_near_matches(qry1, entry.sequence, max_substitutions=subs, max_deletions=dels,
+                                              max_insertions=insrt)
+                matchesq2 = find_near_matches(qry2, entry.sequence, max_substitutions=subs, max_deletions=dels,
+                                              max_insertions=insrt)
+                matchesq1rc = find_near_matches(qry1rc, entry.sequence, max_substitutions=subs, max_deletions=dels,
+                                                max_insertions=insrt)
+                matchesq2rc = find_near_matches(qry2rc, entry.sequence, max_substitutions=subs, max_deletions=dels,
+                                                max_insertions=insrt)
+            else:
+                matchesq1 = find_near_matches(qry1, entry.sequence, max_l_dist=l_dist)
+                matchesq2 = find_near_matches(qry2, entry.sequence, max_l_dist=l_dist)
+                matchesq1rc = find_near_matches(qry1rc, entry.sequence, max_l_dist=l_dist)
+                matchesq2rc = find_near_matches(qry2rc, entry.sequence, max_l_dist=l_dist)
 
-            # matchesq1 = ray.get(rrfind_near_matches.remote(qry1, entry.sequence))
-            # #print(matchesqxx)
-            # matchesq2 = ray.get(rrfind_near_matches.remote(qry2, entry.sequence))
-            # matchesq1rc = ray.get(rrfind_near_matches.remote(qry1rc, entry.sequence))
-            # matchesq2rc = ray.get(rrfind_near_matches.remote(qry2rc, entry.sequence))
             # skip fastq entry if multiple matches to same motif query seq
             if (len(matchesq1) > 1):
                 countqmulti += 1
@@ -407,7 +485,7 @@ def survey_fastq(resultx_reads_list, fqout):
     with pysam.FastxFile(fqout) as fh:
         for entry in fh:
             resultx_reads_list.append(entry.name)
-            #resultx_reads_dict[entry.name] = len(str(entry.sequence))
+            # resultx_reads_dict[entry.name] = len(str(entry.sequence))
 
 
 # if nano == False:
@@ -446,9 +524,9 @@ def survey_fastq(resultx_reads_list, fqout):
 # #
 #
 #
-    # with pysam.FastxFile(fqout2_filename) as fin, open(fqoutm_filename, mode='w') as fout:
-    #     for entry in fin:
-    #         if entry.name in c:
+# with pysam.FastxFile(fqout2_filename) as fin, open(fqoutm_filename, mode='w') as fout:
+#     for entry in fin:
+#         if entry.name in c:
 #             fout.write(str(entry) + '\n')
 #
 # with pysam.FastxFile(fqout1_filename) as fin, open(fqoutm_filename, mode='a') as fout:
@@ -460,21 +538,33 @@ def survey_fastq(resultx_reads_list, fqout):
 #       "\tcombined(non redundant):" + str(len(u)) + "\tnon overlapping:" + str(len(c)) + "\n")
 
 
-if nano == False:
-    # print(datetime.datetime.now())
-    # pi = multiprocessing.Pool(ncpus)
-    # for fq in glob.glob(fastq_dir + "*q.gz"):
-    #     pi.apply_async(pimms_fastq,
-    #                    args=(fq, (os.path.splitext(os.path.splitext(fq)[0])[0] + fq_result_suffix)))
-    #
-    # pi.close()
-    # pi.join()
-    # print("illumina initial PIMMS filtering completed...\n")
-    # print(datetime.datetime.now())
+if not nano:  # nano == False
+    print(datetime.datetime.now())
+    pi = multiprocessing.Pool(ncpus)
+    for fq in glob.glob(fastq_dir + "*q.gz"):
+        pi.apply_async(pimms_fastq,
+                       args=(fq,
+                             os.path.join(out_dir,
+                                          os.path.splitext(os.path.splitext(os.path.basename(fq))[0])[
+                                              0] + fq_result_suffix
+                                          )  # output illumina fastq output filepath
+                             # (os.path.splitext(os.path.splitext(fq)[0])[0] + fq_result_suffix)))
+                             )
+                       )
 
-    fqp_results_fwd = sorted(glob.glob(fastq_dir + "*_R1_*" + fq_result_suffix))
-    fqp_results_rev = sorted(glob.glob(fastq_dir + "*_R2_*" + fq_result_suffix))
-    # print(fqp_results_fwd)
+    pi.close()
+    pi.join()
+    print("illumina initial PIMMS filtering completed...\n")
+    print(datetime.datetime.now())
+
+    # fqp_results_fwd = sorted(glob.glob(fastq_dir + "*_R1_*" + fq_result_suffix))
+    # fqp_results_rev = sorted(glob.glob(fastq_dir + "*_R2_*" + fq_result_suffix))
+    #  fqp_results_fwd = sorted(glob.glob(out_dir + "*_R1_*" + fq_result_suffix))
+    #  fqp_results_rev = sorted(glob.glob(out_dir + "*_R2_*" + fq_result_suffix))
+    fqp_results_fwd = sorted(glob.glob(os.path.join(out_dir, "*_R1_*" + fq_result_suffix)))
+    fqp_results_rev = sorted(glob.glob(os.path.join(out_dir, "*_R2_*" + fq_result_suffix)))
+    print(fqp_results_fwd)
+    print(fqp_results_rev)
     import re
 
     for fwd_fqp_result, rev_fqp_result in zip(fqp_results_fwd, fqp_results_rev):
@@ -504,13 +594,19 @@ if nano == False:
                     fout.write(str(entry) + '\n')
 
 
-
-elif nano == True:
+elif nano:  # nano == True
     print(datetime.datetime.now())
     pn = multiprocessing.Pool(ncpus)
     for fq in glob.glob(fastq_dir + "*q.gz"):
         pn.apply_async(pimms_fastq,
-                       args=(fq, (os.path.splitext(os.path.splitext(fq)[0])[0] + fq_result_suffix)))
+                       args=(fq,  # input nanopore fastq filepath
+                             os.path.join(out_dir,
+                                          os.path.splitext(os.path.splitext(os.path.basename(fq))[0])[
+                                              0] + fq_result_suffix
+                                          )  # output nanopore fastq output filepath
+                             )
+                       #   (os.path.splitext(os.path.splitext(fq)[0])[0] + fq_result_suffix))
+                       )
 
     pn.close()
     pn.join()

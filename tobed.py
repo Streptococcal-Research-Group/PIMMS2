@@ -31,8 +31,10 @@ import urllib as ul
 # def main():
 
 min_depth_cutoff = 1
-insamfile = "0140J_test.IN.PIMMS.RX.rmIS.sub0_min25_max50.ngm_sensitive.90pc.bam"
-annotation = gffpd.read_gff3('/Users/svzaw/Data/PIMMS_redo/PIMMS2_stuff/PIMMS_V1/S.uberis_0140J.gff3')
+# insamfile = "0140J_test.IN.PIMMS.RX.rmIS.sub0_min25_max50.ngm_sensitive.90pc.bam"
+insamfile = "pGh9_UK15_UK15_Media_Input_pimmsout_trim50_nodecon_mm2.bam"
+# annotation = gffpd.read_gff3('/Users/svzaw/Data/PIMMS_redo/PIMMS2_stuff/PIMMS_V1/S.uberis_0140J.gff3')
+annotation = gffpd.read_gff3('UK15_genome_fix02.gff')
 attr_to_columns = annotation.attributes_to_columns()
 attr_to_columns = attr_to_columns[attr_to_columns['type'] == 'CDS']
 attr_to_columns = attr_to_columns.assign(feat_length=(attr_to_columns.end - attr_to_columns.start + 1)).dropna(axis=1,
@@ -45,8 +47,8 @@ attr_to_columns = attr_to_columns.assign(product_nopc=attr_to_columns['product']
 
 # attr_to_columns = attr_to_columns.dropna(axis=1, how='all')
 samfile = pysam.AlignmentFile(insamfile, "rb")
-open("test.bed", 'w').close()
-f = open("test.bed", "a")
+open("test2.bed", 'w').close()
+f = open("test2.bed", "a")
 
 STRAND = ["+", "-"]
 for read in samfile.fetch():
@@ -56,8 +58,8 @@ for read in samfile.fetch():
     f.write('\n')
 f.close()
 
-open("test.insert_coords.txt", 'w').close()
-f2 = open("test.insert_coords.txt", "a")
+open("test2.insert_coords.txt", 'w').close()
+f2 = open("test2.insert_coords.txt", "a")
 f2.write('\t'.join([str(i) for i in ['ref_name', 'coord', 'strand', 'read_name']]))
 f2.write('\n')
 STRAND = ["+", "-"]
@@ -73,7 +75,7 @@ for read in samfile.fetch():
         f2.write('\n')
 f2.close()
 
-coord_df = pd.read_csv("test.insert_coords.txt", sep='\t', dtype={'coord': "int64"})
+coord_df = pd.read_csv("test2.insert_coords.txt", sep='\t', dtype={'coord': "int64"})
 coord_counts_df = coord_df.groupby(['ref_name', 'coord']).size().reset_index(name='counts')
 
 number_of_insertion_sites = len(coord_counts_df)
@@ -160,7 +162,7 @@ pimms_result_table = pimms_result_table[['seq_id',
 
 print(list(pimms_result_table.columns.values))
 
-pimms_result_table.to_csv("pimms2_result_table_tab.csv", index=False, sep='\t')
+pimms_result_table.to_csv("pimms2_result_table_test2_tab.csv", index=False, sep='\t')
 
 # num_insert_sites_per_feat_per_kb=('counts', '(count / feat_length) *100')
 
