@@ -29,26 +29,41 @@ import urllib as ul
 
 # main function
 # def main():
+from gffpandas.gffpandas import Gff3DataFrame
 
 min_depth_cutoff = 1
-# insamfile = "0140J_test.IN.PIMMS.RX.rmIS.sub0_min25_max50.ngm_sensitive.90pc.bam"
-insamfile = "pGh9_UK15_UK15_Media_Input_pimmsout_trim50_nodecon_mm2.bam"
-# annotation = gffpd.read_gff3('/Users/svzaw/Data/PIMMS_redo/PIMMS2_stuff/PIMMS_V1/S.uberis_0140J.gff3')
-annotation = gffpd.read_gff3('UK15_genome_fix02.gff')
+# sam_file = "0140J_test.IN.PIMMS.RX.rmIS.sub0_min25_max50.ngm_sensitive.90pc.bam"
+
+sam_file = "UK15_Media_RX_pimms2out_trim60_v_pGh9_UK15.bam"
+# sam_file = "UK15_Blood_RX_pimms2out_trim60_v_pGh9_UK15.bam"
+sam_stem, sam_ext = os.path.splitext(os.path.basename(sam_file))
+# gff_file = '/Users/svzaw/Data/PIMMS_redo/PIMMS2_stuff/PIMMS_V1/S.uberis_0140J.gff3'
+gff_file = 'UK15_genome_fix02.gff'
+gff_feat_type = 'CDS'
+annotation: Gff3DataFrame = gffpd.read_gff3(gff_file)
+
+# break 9th gff column key=value pairs down to make additional columns
 attr_to_columns = annotation.attributes_to_columns()
-attr_to_columns = attr_to_columns[attr_to_columns['type'] == 'CDS']
-attr_to_columns = attr_to_columns.assign(feat_length=(attr_to_columns.end - attr_to_columns.start + 1)).dropna(axis=1,
-                                                                                                               how='all').drop(
-    columns=['attributes'])
+attr_to_columns = attr_to_columns[attr_to_columns['type'] == gff_feat_type]  # filter to CDS
+# add feature length column and do some cleanup
+attr_to_columns = attr_to_columns.assign(
+    feat_length=(attr_to_columns.end - attr_to_columns.start + 1)).dropna(axis=1,
+                                                                          how='all').drop(columns=['attributes'])
 
 # remove RFC 3986 % encoding from product (gff3 attribute)
 attr_to_columns = attr_to_columns.assign(product_nopc=attr_to_columns['product'].apply(ul.parse.unquote)).drop(
     columns=['product']).rename(columns={'product_nopc': 'product'})
-
+gff_columns_addback = attr_to_columns[['seq_id',
+                                       'locus_tag',
+                                       'gene',
+                                       'start',
+                                       'end',
+                                       'feat_length',
+                                       'product']]
 # attr_to_columns = attr_to_columns.dropna(axis=1, how='all')
-samfile = pysam.AlignmentFile(insamfile, "rb")
-open("test2.bed", 'w').close()
-f = open("test2.bed", "a")
+samfile = pysam.AlignmentFile(sam_file, "rb")
+open(sam_stem + ".bed", 'w').close()
+f = open(sam_stem + ".bed", "a")
 
 STRAND = ["+", "-"]
 for read in samfile.fetch():
@@ -58,8 +73,8 @@ for read in samfile.fetch():
     f.write('\n')
 f.close()
 
-open("test2.insert_coords.txt", 'w').close()
-f2 = open("test2.insert_coords.txt", "a")
+open(sam_stem + ".insert_coords.txt", 'w').close()
+f2 = open(sam_stem + ".insert_coords.txt", "a")
 f2.write('\t'.join([str(i) for i in ['ref_name', 'coord', 'strand', 'read_name']]))
 f2.write('\n')
 STRAND = ["+", "-"]
@@ -75,7 +90,7 @@ for read in samfile.fetch():
         f2.write('\n')
 f2.close()
 
-coord_df = pd.read_csv("test2.insert_coords.txt", sep='\t', dtype={'coord': "int64"})
+coord_df = pd.read_csv(sam_stem + ".insert_coords.txt", sep='\t', dtype={'ref_name': "str", 'coord': "int64"})
 coord_counts_df = coord_df.groupby(['ref_name', 'coord']).size().reset_index(name='counts')
 
 number_of_insertion_sites = len(coord_counts_df)
@@ -105,8 +120,8 @@ mean_between_insertion_gap = round(coord_counts_df['between_insertion_gap'].mean
 sqlcode = '''
     select coord_counts_df.*
     ,attr_to_columns.*
-    from coord_counts_df
-    inner join attr_to_columns 
+    from attr_to_columns
+    left join coord_counts_df
     on coord_counts_df.coord between attr_to_columns.start and attr_to_columns.end
     where coord_counts_df.ref_name like '%' || attr_to_columns.seq_id || '%'
     '''
@@ -162,7 +177,17 @@ pimms_result_table = pimms_result_table[['seq_id',
 
 print(list(pimms_result_table.columns.values))
 
-pimms_result_table.to_csv("pimms2_result_table_test2_tab.csv", index=False, sep='\t')
+# pimms_result_table_full gff_columns_addback
+
+NAvalues = {'num_reads_mapped_per_feat': 0,
+            'num_insert_sites_per_feat': 0,
+            'num_insert_sites_per_feat_per_kb': 0,
+            'posn_as_percentile_first': 0,
+            'posn_as_percentile_last': 0,
+            'NRM_score': 0,
+            'NIM_score': 0}
+pimms_result_table_full = pd.merge(gff_columns_addback, pimms_result_table, how='left').fillna(value=NAvalues)
+pimms_result_table_full.to_csv(sam_stem + "_countinfo_tab.csv", index=False, sep='\t')
 
 # num_insert_sites_per_feat_per_kb=('counts', '(count / feat_length) *100')
 
