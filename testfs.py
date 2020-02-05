@@ -185,7 +185,7 @@ fqout_filename = "PIMMS_Test_1_sub" + str(subs) + "_min" + str(min_length) + "_m
 # print('')
 # print(str(
 #     datetime.datetime.now()) + "\tFinding PIMMS insertion flanking matches...\nfq1:\t" + fq1_filename + "\nfq2:\t" + fq2_filename + "\n")
-
+###
 
 # count = 0
 # countq1 = 0

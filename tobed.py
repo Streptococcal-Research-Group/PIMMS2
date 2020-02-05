@@ -145,8 +145,8 @@ pimms_result_table = coords_join_gff.groupby(
     ['seq_id', 'locus_tag', 'gene', 'start', 'end', 'feat_length', 'product']).agg(
     num_reads_mapped_per_feat=('counts', 'sum'),
     num_insert_sites_per_feat=('counts', 'count'),
-    posn_as_percentile_first=('posn_as_percentile', 'min'),
-    posn_as_percentile_last=('posn_as_percentile', 'max')
+    first_insert_posn_as_percentile=('posn_as_percentile', 'min'),
+    last_insert_posn_as_percentile=('posn_as_percentile', 'max')
 ).reset_index()
 
 pimms_result_table = pimms_result_table.assign(num_insert_sites_per_feat_per_kb=(
@@ -170,8 +170,8 @@ pimms_result_table = pimms_result_table[['seq_id',
                                          'num_reads_mapped_per_feat',
                                          'num_insert_sites_per_feat',
                                          'num_insert_sites_per_feat_per_kb',
-                                         'posn_as_percentile_first',
-                                         'posn_as_percentile_last',
+                                         'first_insert_posn_as_percentile',
+                                         'last_insert_posn_as_percentile',
                                          'NRM_score',
                                          'NIM_score']]
 
@@ -182,8 +182,8 @@ print(list(pimms_result_table.columns.values))
 NAvalues = {'num_reads_mapped_per_feat': 0,
             'num_insert_sites_per_feat': 0,
             'num_insert_sites_per_feat_per_kb': 0,
-            'posn_as_percentile_first': 0,
-            'posn_as_percentile_last': 0,
+            'first_insert_posn_as_percentile': 0,
+            'last_insert_posn_as_percentile': 0,
             'NRM_score': 0,
             'NIM_score': 0}
 pimms_result_table_full = pd.merge(gff_columns_addback, pimms_result_table, how='left').fillna(value=NAvalues)
