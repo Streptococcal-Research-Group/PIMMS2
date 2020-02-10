@@ -31,14 +31,18 @@ import urllib as ul
 # def main():
 from gffpandas.gffpandas import Gff3DataFrame
 
+use_fraction_mismatch = False
 min_depth_cutoff = 1
+permitted_mismatch = 6
+permitted_fraction_mismatch = 0.06
 # sam_file = "0140J_test.IN.PIMMS.RX.rmIS.sub0_min25_max50.ngm_sensitive.90pc.bam"
 
-sam_file = "UK15_Media_RX_pimms2out_trim60_v_pGh9_UK15.bam"
-# sam_file = "UK15_Blood_RX_pimms2out_trim60_v_pGh9_UK15.bam"
+# sam_file = "UK15_Media_RX_pimms2out_trim60_v_pGh9_UK15.bam"
+sam_file = "UK15_Blood_RX_pimms2out_trim60_v_pGh9_UK15.bam"
 sam_stem, sam_ext = os.path.splitext(os.path.basename(sam_file))
+sam_stem = sam_stem + '_prokkaX'
 # gff_file = '/Users/svzaw/Data/PIMMS_redo/PIMMS2_stuff/PIMMS_V1/S.uberis_0140J.gff3'
-gff_file = 'UK15_genome_fix02.gff'
+gff_file = 'UK15_prokka_fix01.gff'
 gff_feat_type = 'CDS'
 annotation: Gff3DataFrame = gffpd.read_gff3(gff_file)
 
@@ -68,7 +72,7 @@ f = open(sam_stem + ".bed", "a")
 STRAND = ["+", "-"]
 for read in samfile.fetch():
     STR = STRAND[int(read.is_reverse)]
-    BED = [read.reference_name, read.pos, read.reference_end, ".", read.mapq, STR, '# ' + read.query_name]
+    BED = [read.reference_name, read.pos, read.reference_end, ".", read.mapping_quality, STR, '# ' + read.query_name]
     f.write('\t'.join([str(i) for i in BED]))
     f.write('\n')
 f.close()
@@ -79,9 +83,19 @@ f2.write('\t'.join([str(i) for i in ['ref_name', 'coord', 'strand', 'read_name']
 f2.write('\n')
 STRAND = ["+", "-"]
 for read in samfile.fetch():
-    STR = STRAND[int(read.is_reverse)]
+    if read.is_unmapped:
+        continue
+    #   if read.infer_query_length == 25:
+    #   print(str(read.get_tag('NM')))
+    NM_value = read.get_tag('NM')
+    if not use_fraction_mismatch and NM_value > permitted_mismatch:
+        continue
+    elif use_fraction_mismatch and NM_value > 0:
+        if (read.query_alignment_length * permitted_mismatch) > NM_value:
+            continue
+    STR = STRAND[int(read.is_reverse)]  # coverts is_reverse boolean into + or - strings
     if STR == '+':
-        COORDS = [read.reference_name, (read.pos + 4), STR, '# ' + read.query_name]
+        COORDS = [read.reference_name, (read.reference_start + 4), STR, '# ' + read.query_name]
         f2.write('\t'.join([str(i) for i in COORDS]))
         f2.write('\n')
     if STR == '-':

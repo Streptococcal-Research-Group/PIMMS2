@@ -1,4 +1,5 @@
 from argparse import _SubParsersAction
+import configparser
 import pathlib
 from fuzzysearch import find_near_matches
 import os
@@ -48,8 +49,10 @@ findflank = modes.add_parser("find_flank", help="Mode: filter fastq files to fin
 samcoords = modes.add_parser("sam_extract", help="Mode: extract insertion site coordinates from sam file")
 otherstuff = modes.add_parser("other_stuff", help='Mode: do other good PIMMS related stuff')
 # Add the arguments to the parser
-findflank.add_argument('-v', '--version', action='version', version='%(prog)s 0.0.2',
-                       help="version")
+findflank.add_argument("--config", required=False, nargs=1, dest='config_file', type=str, default='',
+                       help="read parameters from config file")
+ap.add_argument('-v', '--version', action='version', version='%(prog)s 0.0.2',
+                help="version")
 findflank.add_argument("--ont", required=False, action='store_true',
                        help="nanopore reads [default: illumina paired end]")
 findflank.add_argument("--single", required=False, action='store_true',
@@ -59,24 +62,24 @@ findflank.add_argument("--rmvector", required=False, action='store_true',
 
 findflank.add_argument("--lev", required=False, action='store_true',
                        help="use Levenshtein distance of 1")
-findflank.add_argument("-d", "--dir", required=False, nargs=1, dest='in_dir',
+findflank.add_argument("--in_dir", required=False, nargs=1, dest='in_dir',
                        help="directory containing input fastq files")
-findflank.add_argument("-r", "--rdir", required=False, nargs=1, metavar='DIR', dest='out_dir',  # action='store',
-                       default=(['pimms2_' + time.strftime("%Y%m%d_%H%M%S")]),
+findflank.add_argument("--out_dir", required=False, nargs=1, metavar='DIR', default=[''],  # dest='out_dir'
+                       action='store',
+                       # (['pimms2_' + time.strftime("%y%m%d_%H%M%S")]),
                        help="directory to contain fastq files results")
+findflank.add_argument("--cpus", required=False, nargs=1, type=int, default=(os.cpu_count() - 2),
+                       help="number of processors to use")
 findflank.add_argument("--max", required=False, nargs=1, type=int,
                        help="clip results to this length [illumina:60/nano:100")
-findflank.add_argument("--config", required=False, nargs=1,
-                       help="read parameters from config file")
+findflank.add_argument("--min", required=False, nargs=1, type=int,
+                       help="minimum read length [illumina:60/nano:100")
 samcoords.add_argument("-s", "--sam", required=False, nargs=1,
                        help="sam file of mapped IS flanking sequences")
 
-samcoords.add_argument("--config", required=False, nargs=1,
-                       help="read parameters from config file")
-otherstuff.add_argument("--config", required=False, nargs=1,
-                        help="read parameters from config file")
-
-if len(sys.argv) < 2:
+# samcoords.add_argument("--config", required=False, nargs=1,
+#                        help="read parameters from config file")
+if len(sys.argv) <= 2:
     ap.print_usage()
     sys.exit(1)
 
@@ -85,15 +88,51 @@ if len(sys.argv) < 2:
 parsed_args = ap.parse_args()
 
 # print((vars(parsed_args)['out_dir']))
-out_dir: object = vars(parsed_args)['out_dir'][0]
+# out_dir: object = vars(parsed_args)['out_dir'][0]
+print((vars(parsed_args)))
+# config_file: object = vars(parsed_args)['config_file'][0]
+config_file = parsed_args.config_file[0]
+
+# construct config parser
+p2config = configparser.ConfigParser()
+# p2config.read(config_file)
+
+# if p2config.out_dir:
+#    out_dir = p2config.out_dir
+# elif parsed_args.out_dir[0]:
+#     out_dir = parsed_args.out_dir[0]
+# else:
+#     out_dir = (['pimms2_' + time.strftime("%y%m%d_%H%M%S")])
+
+# if not config_file:
+#     print("no config file provided")
+# elif os.path.isfile(config_file):
+#     print('reading additional parameters from ' + config_file + '\n')
+#     p2config.read(config_file)
+#     for key in p2config['find_flank']:
+#         print(key + ' = ' + p2config['find_flank'][key])
+# else:
+#     print('supplied config file ' + config_file + ' not found -- exiting\n', file=sys.stderr)
+
+p2config.read(config_file)
+if p2config.get("find_flank", "out_dir"):
+    out_dir = p2config.get("find_flank", "out_dir")
+    print('\ncreating result dir:1 ' + out_dir + '\n')
+elif parsed_args.out_dir[0]:
+    out_dir = parsed_args.out_dir[0]
+    print('\ncreating result dir:2 ' + out_dir + '\n')
+else:
+    out_dir = 'pimms2_' + time.strftime("%y%m%d_%H%M%S")
+    print('\ncreating result dir:3 ' + out_dir + '\n')
+    # createFolder(out_dir)
 
 if os.path.isdir(out_dir):
-    print('result dir exists\n')
+    print('\nresult dir exists\n')
 else:
-    print('creating result dir: ' + out_dir + '\n')
+    # print('\ncreating result dir: ' + out_dir + '\n')
     createFolder(out_dir)
 
-# exit(0)
+exit(0)
 
 print(pimms_mls)
 
