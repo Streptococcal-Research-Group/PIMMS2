@@ -7,6 +7,9 @@ import gffpandas.gffpandas as gffpd
 import pandasql as ps
 import pysam
 import urllib as ul
+import argparse
+from argparse import _SubParsersAction
+import configparser
 #
 # sub get_position_as_percentile_pos{
 # my $in = $_;
@@ -31,6 +34,31 @@ import urllib as ul
 # def main():
 from gffpandas.gffpandas import Gff3DataFrame
 
+ap = argparse.ArgumentParser(description='PIMMS2 fastq sequence processing', prog="demo_pimms2",
+                             epilog="\n\n*** N.B. This is a development version ***\n \n ")
+modes: _SubParsersAction = ap.add_subparsers()
+# modes.required = False
+findflank = modes.add_parser("find_flank", help="Mode: filter fastq files to find insertion site flanking sequence")
+samcoords = modes.add_parser("sam_extract", help="Mode: extract insertion site coordinates from sam file")
+otherstuff = modes.add_parser("other_stuff", help='Mode: do other good PIMMS related stuff')
+
+samcoords.add_argument("-s", "--sam", required=False, nargs=1,
+                       help="sam file of mapped IS flanking sequences")
+samcoords.add_argument("--mismatch", required=False, nargs=1, type=int,
+                       help="number/fraction of permitted mismatches in mapped read")
+samcoords.add_argument("--gff_extra", required=False, nargs=1, type=str, default='',
+                       help="comma separated list of extra fields to include from the GFF3 annotation\ne.g. 'ID,translation,note' ")
+
+parsed_args = ap.parse_args()
+
+if parsed_args.gff_extra:
+    gff_extra = parsed_args.gff_extra[0].split(',')
+else:
+    gff_extra = []
+
+print("extra gff fields: " + str(gff_extra))
+
+# exit()
 use_fraction_mismatch = False
 min_depth_cutoff = 1
 permitted_mismatch = 6
@@ -40,30 +68,38 @@ permitted_fraction_mismatch = 0.06
 # sam_file = "UK15_Media_RX_pimms2out_trim60_v_pGh9_UK15.bam"
 sam_file = "UK15_Blood_RX_pimms2out_trim60_v_pGh9_UK15.bam"
 sam_stem, sam_ext = os.path.splitext(os.path.basename(sam_file))
-sam_stem = sam_stem + '_prokkaX'
+sam_stem = sam_stem + '_fix03'
 # gff_file = '/Users/svzaw/Data/PIMMS_redo/PIMMS2_stuff/PIMMS_V1/S.uberis_0140J.gff3'
-gff_file = 'UK15_prokka_fix01.gff'
-gff_feat_type = 'CDS'
-annotation: Gff3DataFrame = gffpd.read_gff3(gff_file)
+gff_file = 'UK15_assembly_fix03.gff'
+gff_feat_type = ['CDS', 'tRNA', 'rRNA']
 
+annotation = gffpd.read_gff3(gff_file)
+annotation = annotation.filter_feature_of_type(gff_feat_type)
 # break 9th gff column key=value pairs down to make additional columns
 attr_to_columns = annotation.attributes_to_columns()
-attr_to_columns = attr_to_columns[attr_to_columns['type'] == gff_feat_type]  # filter to CDS
+# attr_to_columns = attr_to_columns[attr_to_columns['type'] == gff_feat_type]  # filter to CDS
+#attr_to_columns = attr_to_columns.filter_feature_of_type(gff_feat_type)  # filter to gff_feat_type = ['CDS', 'tRNA', 'rRNA']
 # add feature length column and do some cleanup
 attr_to_columns = attr_to_columns.assign(
     feat_length=(attr_to_columns.end - attr_to_columns.start + 1)).dropna(axis=1,
                                                                           how='all').drop(columns=['attributes'])
 
 # remove RFC 3986 % encoding from product (gff3 attribute)
-attr_to_columns = attr_to_columns.assign(product_nopc=attr_to_columns['product'].apply(ul.parse.unquote)).drop(
-    columns=['product']).rename(columns={'product_nopc': 'product'})
+# attr_to_columns = attr_to_columns.assign(product_nopc=attr_to_columns['product'].apply(ul.parse.unquote)).drop(
+#    columns=['product']).rename(columns={'product_nopc': 'product'})
+
+attr_to_columns['product'] = attr_to_columns['product'].apply(ul.parse.unquote)
+
+for field in gff_extra:
+    attr_to_columns[field] = attr_to_columns[field].apply(ul.parse.unquote)
+
 gff_columns_addback = attr_to_columns[['seq_id',
                                        'locus_tag',
                                        'gene',
                                        'start',
                                        'end',
                                        'feat_length',
-                                       'product']]
+                                       'product'] + gff_extra]  # add extra fields from gff
 # attr_to_columns = attr_to_columns.dropna(axis=1, how='all')
 samfile = pysam.AlignmentFile(sam_file, "rb")
 open(sam_stem + ".bed", 'w').close()
@@ -90,7 +126,7 @@ for read in samfile.fetch():
     NM_value = read.get_tag('NM')
     if not use_fraction_mismatch and NM_value > permitted_mismatch:
         continue
-    elif use_fraction_mismatch and NM_value > 0:
+    elif use_fraction_mismatch:  # and NM_value > 0:
         if (read.query_alignment_length * permitted_mismatch) > NM_value:
             continue
     STR = STRAND[int(read.is_reverse)]  # coverts is_reverse boolean into + or - strings
@@ -156,7 +192,7 @@ coords_join_gff = coords_join_gff.assign(
 print(list(attr_to_columns.columns.values))
 
 pimms_result_table = coords_join_gff.groupby(
-    ['seq_id', 'locus_tag', 'gene', 'start', 'end', 'feat_length', 'product']).agg(
+    ['seq_id', 'locus_tag', 'gene', 'start', 'end', 'feat_length', 'product'] + gff_extra).agg(
     num_reads_mapped_per_feat=('counts', 'sum'),
     num_insert_sites_per_feat=('counts', 'count'),
     first_insert_posn_as_percentile=('posn_as_percentile', 'min'),
@@ -180,8 +216,8 @@ pimms_result_table = pimms_result_table[['seq_id',
                                          'start',
                                          'end',
                                          'feat_length',
-                                         'product',
-                                         'num_reads_mapped_per_feat',
+                                         'product'] + gff_extra +
+                                        ['num_reads_mapped_per_feat',
                                          'num_insert_sites_per_feat',
                                          'num_insert_sites_per_feat_per_kb',
                                          'first_insert_posn_as_percentile',
@@ -193,13 +229,13 @@ print(list(pimms_result_table.columns.values))
 
 # pimms_result_table_full gff_columns_addback
 
-NAvalues = {'num_reads_mapped_per_feat': 0,
-            'num_insert_sites_per_feat': 0,
-            'num_insert_sites_per_feat_per_kb': 0,
-            'first_insert_posn_as_percentile': 0,
-            'last_insert_posn_as_percentile': 0,
-            'NRM_score': 0,
-            'NIM_score': 0}
+NAvalues = {'num_reads_mapped_per_feat': int(0),
+            'num_insert_sites_per_feat': int(0),
+            'num_insert_sites_per_feat_per_kb': int(0),
+            'first_insert_posn_as_percentile': int(0),
+            'last_insert_posn_as_percentile': int(0),
+            'NRM_score': int(0),
+            'NIM_score': int(0)}
 pimms_result_table_full = pd.merge(gff_columns_addback, pimms_result_table, how='left').fillna(value=NAvalues)
 pimms_result_table_full.to_csv(sam_stem + "_countinfo_tab.csv", index=False, sep='\t')
 
