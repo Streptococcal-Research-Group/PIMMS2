@@ -79,40 +79,22 @@ samcoords.add_argument("-s", "--sam", required=False, nargs=1,
 
 # samcoords.add_argument("--config", required=False, nargs=1,
 #                        help="read parameters from config file")
+
+# exit and print sort help message if no mode/arguments supplied
 if len(sys.argv) <= 2:
     ap.print_usage()
     sys.exit(1)
 
-# args = vars(ap.parse_args())
-
+# do command line processing
 parsed_args = ap.parse_args()
 
-# print((vars(parsed_args)['out_dir']))
-# out_dir: object = vars(parsed_args)['out_dir'][0]
 print((vars(parsed_args)))
-# config_file: object = vars(parsed_args)['config_file'][0]
+
 config_file = parsed_args.config_file[0]
 
 # construct config parser
 p2config = configparser.ConfigParser()
-# p2config.read(config_file)
 
-# if p2config.out_dir:
-#    out_dir = p2config.out_dir
-# elif parsed_args.out_dir[0]:
-#     out_dir = parsed_args.out_dir[0]
-# else:
-#     out_dir = (['pimms2_' + time.strftime("%y%m%d_%H%M%S")])
-
-# if not config_file:
-#     print("no config file provided")
-# elif os.path.isfile(config_file):
-#     print('reading additional parameters from ' + config_file + '\n')
-#     p2config.read(config_file)
-#     for key in p2config['find_flank']:
-#         print(key + ' = ' + p2config['find_flank'][key])
-# else:
-#     print('supplied config file ' + config_file + ' not found -- exiting\n', file=sys.stderr)
 
 p2config.read(config_file)
 if p2config.get("find_flank", "out_dir"):

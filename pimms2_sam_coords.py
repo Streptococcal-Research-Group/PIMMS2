@@ -1,4 +1,5 @@
 import os
+import sys
 import datetime
 import multiprocessing
 import pysam
@@ -9,6 +10,9 @@ import pysam
 import urllib as ul
 import argparse
 from argparse import _SubParsersAction
+import configparser
+## pandas + 'xlsxwriter'
+
 import configparser
 #
 # sub get_position_as_percentile_pos{
@@ -40,16 +44,39 @@ modes: _SubParsersAction = ap.add_subparsers()
 # modes.required = False
 findflank = modes.add_parser("find_flank", help="Mode: filter fastq files to find insertion site flanking sequence")
 samcoords = modes.add_parser("sam_extract", help="Mode: extract insertion site coordinates from sam file")
-otherstuff = modes.add_parser("other_stuff", help='Mode: do other good PIMMS related stuff')
+otherstuff = modes.add_parser("other_stuff", help='Mode: do other good PIMMS2 related stuff')
 
+samcoords.add_argument("--config", required=False, nargs=1, dest='config_file', type=str, default='',
+                       help="read parameters from config file")
 samcoords.add_argument("-s", "--sam", required=False, nargs=1,
-                       help="sam file of mapped IS flanking sequences")
+                       help="sam/bam file of mapped IS flanking sequences ")
 samcoords.add_argument("--mismatch", required=False, nargs=1, type=int,
                        help="number/fraction of permitted mismatches in mapped read")
+samcoords.add_argument("--gff", required=False, nargs=1, type=str, default='',
+                       help="GFF3 formatted file to use\n(note fasta sequence present in the file must be deleted before use)")
 samcoords.add_argument("--gff_extra", required=False, nargs=1, type=str, default='',
                        help="comma separated list of extra fields to include from the GFF3 annotation\ne.g. 'ID,translation,note' ")
 
+# parsed_args = ap.parse_args()
+
+
+# exit and print sort help message if no mode/arguments supplied
+if len(sys.argv) <= 2:
+    ap.print_usage()
+    sys.exit(1)
+
+# do command line processing
 parsed_args = ap.parse_args()
+
+print((vars(parsed_args)))
+exit()
+# do config parsing
+config_file = parsed_args.config_file[0]
+
+# construct config parser
+p2config = configparser.ConfigParser()
+
+p2config.read(config_file)
 
 if parsed_args.gff_extra:
     gff_extra = parsed_args.gff_extra[0].split(',')
@@ -101,7 +128,7 @@ gff_columns_addback = attr_to_columns[['seq_id',
                                        'feat_length',
                                        'product'] + gff_extra]  # add extra fields from gff
 # attr_to_columns = attr_to_columns.dropna(axis=1, how='all')
-samfile = pysam.AlignmentFile(sam_file, "rb")
+samfile = pysam.AlignmentFile(sam_file)  # without , "rb" should auto detect sam or bams
 open(sam_stem + ".bed", 'w').close()
 f = open(sam_stem + ".bed", "a")
 
@@ -237,7 +264,17 @@ NAvalues = {'num_reads_mapped_per_feat': int(0),
             'NRM_score': int(0),
             'NIM_score': int(0)}
 pimms_result_table_full = pd.merge(gff_columns_addback, pimms_result_table, how='left').fillna(value=NAvalues)
-pimms_result_table_full.to_csv(sam_stem + "_countinfo_tab.csv", index=False, sep='\t')
+pimms_result_table_full.to_csv(sam_stem + "_countinfo_tab.txt", index=False, sep='\t')
+pimms_result_table_full.to_csv(sam_stem + "_countinfo_tab.csv", index=False, sep=',')
+
+writer = pd.ExcelWriter(sam_stem + '_countinfo.xlsx', engine='xlsxwriter')
+
+# Convert the dataframe to an XlsxWriter Excel object.
+pimms_result_table_full.to_excel(writer, sheet_name='PIMMS2_result', index=False)
+
+# Close the Pandas Excel writer and output the Excel file.
+writer.save()
+
 
 # num_insert_sites_per_feat_per_kb=('counts', '(count / feat_length) *100')
 
