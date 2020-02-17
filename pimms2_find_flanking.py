@@ -42,7 +42,7 @@ python PIMMS test script.....
 
 # Construct the argument parser
 ap = argparse.ArgumentParser(description='PIMMS2 fastq sequence processing', prog="demo_pimms2",
-                             epilog="\n\n*** N.B. This is a development version ***\n \n ")
+                             epilog='\n\n*** N.B. This is a development version ***\n \n')
 modes: _SubParsersAction = ap.add_subparsers()
 # modes.required = False
 findflank = modes.add_parser("find_flank", help="Mode: filter fastq files to find insertion site flanking sequence")
@@ -50,7 +50,7 @@ samcoords = modes.add_parser("sam_extract", help="Mode: extract insertion site c
 otherstuff = modes.add_parser("other_stuff", help='Mode: do other good PIMMS related stuff')
 # Add the arguments to the parser
 findflank.add_argument("--config", required=False, nargs=1, dest='config_file', type=str, default='',
-                       help="read parameters from config file")
+                       help="use parameters from config file")
 ap.add_argument('-v', '--version', action='version', version='%(prog)s 0.0.2',
                 help="version")
 findflank.add_argument("--ont", required=False, action='store_true',

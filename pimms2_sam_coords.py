@@ -8,12 +8,12 @@ import gffpandas.gffpandas as gffpd
 import pandasql as ps
 import pysam
 import urllib as ul
-import argparse
-from argparse import _SubParsersAction
-import configparser
+import configargparse
+# from configargparse import _SubParsersAction
+# import configparser
 ## pandas + 'xlsxwriter'
 
-import configparser
+# import configparser
 #
 # sub get_position_as_percentile_pos{
 # my $in = $_;
@@ -38,27 +38,42 @@ import configparser
 # def main():
 from gffpandas.gffpandas import Gff3DataFrame
 
-ap = argparse.ArgumentParser(description='PIMMS2 fastq sequence processing', prog="demo_pimms2",
-                             epilog="\n\n*** N.B. This is a development version ***\n \n ")
-modes: _SubParsersAction = ap.add_subparsers()
+ap = configargparse.ArgumentParser(  # description='PIMMS2 sam/bam processing',
+    prog="demo_pimms2_sam_extract",
+    add_config_file_help=False,
+    config_file_parser_class=configargparse.DefaultConfigFileParser,
+    epilog="\n\n*** N.B. This is a development version ***\n \n ",
+    description='''this description
+                                   was indented weird
+                                   but that is okay'''
+)
+ap.add_argument('--version', action='version', version='%(prog)s 2.0.1 demo')
+modes = ap.add_subparsers(parser_class=configargparse.ArgParser)
+
 # modes.required = False
 findflank = modes.add_parser("find_flank", help="Mode: filter fastq files to find insertion site flanking sequence")
-samcoords = modes.add_parser("sam_extract", help="Mode: extract insertion site coordinates from sam file")
+samcoords = modes.add_parser("sam_extract", add_config_file_help=False,
+                             help="Mode: extract insertion site coordinates from sam file",
+                             description="Args that start with '--' (eg. --sam) can also be set in a config file (specified via -c)")
 otherstuff = modes.add_parser("other_stuff", help='Mode: do other good PIMMS2 related stuff')
 
-samcoords.add_argument("--config", required=False, nargs=1, dest='config_file', type=str, default='',
-                       help="read parameters from config file")
-samcoords.add_argument("-s", "--sam", required=False, nargs=1,
+samcoords.add_argument("-c", "--config", required=False, is_config_file=True,  # dest='config_file',
+                       # type=str, default='',
+                       metavar='pimms2.config',
+                       help="use parameters from config file")
+samcoords.add_argument("--sam", required=True, nargs=1, metavar='pimms.sam/bam',
                        help="sam/bam file of mapped IS flanking sequences ")
-samcoords.add_argument("--mismatch", required=False, nargs=1, type=int,
-                       help="number/fraction of permitted mismatches in mapped read")
-samcoords.add_argument("--gff", required=False, nargs=1, type=str, default='',
+samcoords.add_argument("--mismatch", required=False, nargs=1, type=float, metavar='float', default=0.05,
+                       help="fraction of permitted mismatches in mapped read ( 0 < float < 1 [0.05]")
+samcoords.add_argument("--min_depth", required=False, nargs=1, type=int, default=1,
+                       help="minimum read depth at insertion site")
+samcoords.add_argument("--gff", required=True, nargs=1, type=str, default='', metavar='genome.gff',
                        help="GFF3 formatted file to use\n(note fasta sequence present in the file must be deleted before use)")
-samcoords.add_argument("--gff_extra", required=False, nargs=1, type=str, default='',
+samcoords.add_argument("--gff_extra", required=False, nargs=1, type=str, default='', metavar="'x,y,z'",
                        help="comma separated list of extra fields to include from the GFF3 annotation\ne.g. 'ID,translation,note' ")
 
 # parsed_args = ap.parse_args()
-
+parsed_args = ap.parse_known_args()
 
 # exit and print sort help message if no mode/arguments supplied
 if len(sys.argv) <= 2:
@@ -66,18 +81,24 @@ if len(sys.argv) <= 2:
     sys.exit(1)
 
 # do command line processing
-parsed_args = ap.parse_args()
 
-print((vars(parsed_args)))
-exit()
+
+print(parsed_args.gff)
+print("----------")
+# print(ap.format_help())
+print("----------")
+# print(ap.format_values())  # useful for logging where different settings came from
+
+# print((vars(parsed_args)))
+#exit()
 # do config parsing
-config_file = parsed_args.config_file[0]
+#config_file = parsed_args.config_file[0]
 
 # construct config parser
-p2config = configparser.ConfigParser()
+# p2config = configparser.ConfigParser()
 
-p2config.read(config_file)
-
+# p2config.read(config_file)
+#print("extra gff fields: " + (parsed_args.gff_extra))
 if parsed_args.gff_extra:
     gff_extra = parsed_args.gff_extra[0].split(',')
 else:
@@ -85,7 +106,7 @@ else:
 
 print("extra gff fields: " + str(gff_extra))
 
-# exit()
+exit()
 use_fraction_mismatch = False
 min_depth_cutoff = 1
 permitted_mismatch = 6
@@ -105,7 +126,7 @@ annotation = annotation.filter_feature_of_type(gff_feat_type)
 # break 9th gff column key=value pairs down to make additional columns
 attr_to_columns = annotation.attributes_to_columns()
 # attr_to_columns = attr_to_columns[attr_to_columns['type'] == gff_feat_type]  # filter to CDS
-#attr_to_columns = attr_to_columns.filter_feature_of_type(gff_feat_type)  # filter to gff_feat_type = ['CDS', 'tRNA', 'rRNA']
+# attr_to_columns = attr_to_columns.filter_feature_of_type(gff_feat_type)  # filter to gff_feat_type = ['CDS', 'tRNA', 'rRNA']
 # add feature length column and do some cleanup
 attr_to_columns = attr_to_columns.assign(
     feat_length=(attr_to_columns.end - attr_to_columns.start + 1)).dropna(axis=1,
@@ -274,7 +295,6 @@ pimms_result_table_full.to_excel(writer, sheet_name='PIMMS2_result', index=False
 
 # Close the Pandas Excel writer and output the Excel file.
 writer.save()
-
 
 # num_insert_sites_per_feat_per_kb=('counts', '(count / feat_length) *100')
 
