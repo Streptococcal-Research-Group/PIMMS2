@@ -9,6 +9,8 @@ import pandasql as ps
 import pysam
 import urllib as ul
 import configargparse
+
+
 # from configargparse import _SubParsersAction
 # import configparser
 ## pandas + 'xlsxwriter'
@@ -32,6 +34,13 @@ import configargparse
 # my $percentile =  sprintf("%.1f", ((($in_stop-$in)+1) / ($in_length/100)));
 # return $percentile;
 # }
+class Range(object):
+    def __init__(self, start, end):
+        self.start = start
+        self.end = end
+
+    def __eq__(self, other):
+        return self.start <= other <= self.end
 
 
 # main function
@@ -63,9 +72,12 @@ samcoords.add_argument("-c", "--config", required=False, is_config_file=True,  #
                        help="use parameters from config file")
 samcoords.add_argument("--sam", required=True, nargs=1, metavar='pimms.sam/bam',
                        help="sam/bam file of mapped IS flanking sequences ")
-samcoords.add_argument("--mismatch", required=False, nargs=1, type=float, metavar='float', default=0.05,
-                       help="fraction of permitted mismatches in mapped read ( 0 < float < 1 [0.05]")
-samcoords.add_argument("--min_depth", required=False, nargs=1, type=int, default=1,
+samcoords.add_argument("--label", required=False, nargs=1, metavar='condition_name', default=[''],
+                       help="text tag to add to results file")
+samcoords.add_argument("--mismatch", required=False, nargs=1, type=float, metavar='float', default=[None],
+                       choices=[Range(0.0, 0.2)],
+                       help="fraction of permitted mismatches in mapped read ( 0 <= float < 0.2 [no filter]")
+samcoords.add_argument("--min_depth", required=False, nargs=1, type=int, default=1, metavar='int',
                        help="minimum read depth at insertion site")
 samcoords.add_argument("--gff", required=True, nargs=1, type=str, default='', metavar='genome.gff',
                        help="GFF3 formatted file to use\n(note fasta sequence present in the file must be deleted before use)")
@@ -83,43 +95,48 @@ if len(sys.argv) <= 2:
 # do command line processing
 
 
-print(parsed_args.gff)
+print(parsed_args)
 print("----------")
 # print(ap.format_help())
 print("----------")
-# print(ap.format_values())  # useful for logging where different settings came from
+print(ap.format_values())  # useful for logging where different settings came from
 
 # print((vars(parsed_args)))
-#exit()
+# exit()
 # do config parsing
-#config_file = parsed_args.config_file[0]
+# config_file = parsed_args.config_file[0]
 
 # construct config parser
 # p2config = configparser.ConfigParser()
 
 # p2config.read(config_file)
-#print("extra gff fields: " + (parsed_args.gff_extra))
-if parsed_args.gff_extra:
-    gff_extra = parsed_args.gff_extra[0].split(',')
+# print("extra gff fields: " + (parsed_args.gff_extra))
+if parsed_args[0].gff_extra:
+    # strip any formatting quotes and turn comma separated string into a list of fields
+    gff_extra = parsed_args[0].gff_extra[0].strip("'\"").split(',')
 else:
     gff_extra = []
 
 print("extra gff fields: " + str(gff_extra))
 
-exit()
-use_fraction_mismatch = False
-min_depth_cutoff = 1
-permitted_mismatch = 6
-permitted_fraction_mismatch = 0.06
+# exit()
+use_fraction_mismatch = True
+min_depth_cutoff = parsed_args[0].min_depth[0]
+# permitted_mismatch = 6
+fraction_mismatch = parsed_args[0].mismatch[0]
 # sam_file = "0140J_test.IN.PIMMS.RX.rmIS.sub0_min25_max50.ngm_sensitive.90pc.bam"
 
 # sam_file = "UK15_Media_RX_pimms2out_trim60_v_pGh9_UK15.bam"
-sam_file = "UK15_Blood_RX_pimms2out_trim60_v_pGh9_UK15.bam"
+# sam_file = "UK15_Blood_RX_pimms2out_trim60_v_pGh9_UK15.bam"
+sam_file = parsed_args[0].sam[0]
 sam_stem, sam_ext = os.path.splitext(os.path.basename(sam_file))
-sam_stem = sam_stem + '_fix03'
+sam_stem = sam_stem + '_md' + str(min_depth_cutoff) + '_mm' + str(fraction_mismatch or '')
 # gff_file = '/Users/svzaw/Data/PIMMS_redo/PIMMS2_stuff/PIMMS_V1/S.uberis_0140J.gff3'
-gff_file = 'UK15_assembly_fix03.gff'
+# gff_file = 'UK15_assembly_fix03.gff'
+gff_file = parsed_args[0].gff[0]
 gff_feat_type = ['CDS', 'tRNA', 'rRNA']
+
+# exit()
 
 annotation = gffpd.read_gff3(gff_file)
 annotation = annotation.filter_feature_of_type(gff_feat_type)
@@ -172,10 +189,10 @@ for read in samfile.fetch():
     #   if read.infer_query_length == 25:
     #   print(str(read.get_tag('NM')))
     NM_value = read.get_tag('NM')
-    if not use_fraction_mismatch and NM_value > permitted_mismatch:
-        continue
-    elif use_fraction_mismatch:  # and NM_value > 0:
-        if (read.query_alignment_length * permitted_mismatch) > NM_value:
+    # if not use_fraction_mismatch and NM_value > permitted_mismatch:
+    #    continue
+    if fraction_mismatch:  # and NM_value > 0:
+        if (read.query_alignment_length * fraction_mismatch[0]) > NM_value:
             continue
     STR = STRAND[int(read.is_reverse)]  # coverts is_reverse boolean into + or - strings
     if STR == '+':
@@ -285,6 +302,19 @@ NAvalues = {'num_reads_mapped_per_feat': int(0),
             'NRM_score': int(0),
             'NIM_score': int(0)}
 pimms_result_table_full = pd.merge(gff_columns_addback, pimms_result_table, how='left').fillna(value=NAvalues)
+
+# if set add prefix to columns
+if parsed_args[0].label[0]:
+    label_cols = pimms_result_table_full.columns[pimms_result_table_full.columns.isin(['num_reads_mapped_per_feat',
+                                                                                       'num_insert_sites_per_feat',
+                                                                                       'num_insert_sites_per_feat_per_kb',
+                                                                                       'first_insert_posn_as_percentile',
+                                                                                       'last_insert_posn_as_percentile',
+                                                                                       'NRM_score',
+                                                                                       'NIM_score'])]
+    pimms_result_table_full.rename(columns=dict(zip(label_cols, parsed_args[0].label[0] + '_' + label_cols)),
+                                   inplace=True)
+
 pimms_result_table_full.to_csv(sam_stem + "_countinfo_tab.txt", index=False, sep='\t')
 pimms_result_table_full.to_csv(sam_stem + "_countinfo_tab.csv", index=False, sep=',')
 
@@ -313,7 +343,6 @@ writer.save()
 # Last unique insertion centile position(>= [-m] x coverage)	For each unique insertion position, the centile position of that locus is determined. The last (greatest centile) position is returned.
 # Normalised Reads Mapped (NRM score)	(total number of reads mapped per gene / length of gene in KB) / (total mapped read count / 10 ^ 6)
 # Normalised Insertions Mapped (NIM score)	(total number of unique insertions mapped per gene/length of gene in KB)/(total mapped read count/10^6)
-
 
 #    if __name__ == '__main__':
 #       main()
