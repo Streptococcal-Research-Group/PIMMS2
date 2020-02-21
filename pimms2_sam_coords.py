@@ -2,14 +2,13 @@ import os
 import sys
 import datetime
 import multiprocessing
-import pysam
 import pandas as pd
 import gffpandas.gffpandas as gffpd
 import pandasql as ps
 import pysam
 import urllib as ul
 import configargparse
-
+import warnings
 
 # from configargparse import _SubParsersAction
 # import configparser
@@ -43,6 +42,17 @@ class Range(object):
         return self.start <= other <= self.end
 
 
+def extant_file(x):
+    """
+    'Type' for argparse - checks that file exists but does not open.
+    """
+    if not os.path.exists(x):
+        # Argparse uses the ArgumentTypeError to give a rejection message like:
+        # error: argument input: x does not exist
+        raise configargparse.ArgumentTypeError("{0} does not exist".format(x))
+    return x
+
+
 # main function
 # def main():
 from gffpandas.gffpandas import Gff3DataFrame
@@ -52,9 +62,7 @@ ap = configargparse.ArgumentParser(  # description='PIMMS2 sam/bam processing',
     add_config_file_help=False,
     config_file_parser_class=configargparse.DefaultConfigFileParser,
     epilog="\n\n*** N.B. This is a development version ***\n \n ",
-    description='''this description
-                                   was indented weird
-                                   but that is okay'''
+    description='''description here'''
 )
 ap.add_argument('--version', action='version', version='%(prog)s 2.0.1 demo')
 modes = ap.add_subparsers(parser_class=configargparse.ArgParser)
@@ -70,16 +78,16 @@ samcoords.add_argument("-c", "--config", required=False, is_config_file=True,  #
                        # type=str, default='',
                        metavar='pimms2.config',
                        help="use parameters from config file")
-samcoords.add_argument("--sam", required=True, nargs=1, metavar='pimms.sam/bam',
+samcoords.add_argument("--sam", required=True, nargs=1, metavar='pimms.sam/bam', type=extant_file,
                        help="sam/bam file of mapped IS flanking sequences ")
 samcoords.add_argument("--label", required=False, nargs=1, metavar='condition_name', default=[''],
                        help="text tag to add to results file")
 samcoords.add_argument("--mismatch", required=False, nargs=1, type=float, metavar='float', default=[None],
                        choices=[Range(0.0, 0.2)],
                        help="fraction of permitted mismatches in mapped read ( 0 <= float < 0.2 [no filter]")
-samcoords.add_argument("--min_depth", required=False, nargs=1, type=int, default=1, metavar='int',
-                       help="minimum read depth at insertion site")
-samcoords.add_argument("--gff", required=True, nargs=1, type=str, default='', metavar='genome.gff',
+samcoords.add_argument("--min_depth", required=False, nargs=1, type=int, default=2, metavar='int',
+                       help="minimum read depth at insertion site >= int [2]")
+samcoords.add_argument("--gff", required=True, nargs=1, type=extant_file, default='', metavar='genome.gff',
                        help="GFF3 formatted file to use\n(note fasta sequence present in the file must be deleted before use)")
 samcoords.add_argument("--gff_extra", required=False, nargs=1, type=str, default='', metavar="'x,y,z'",
                        help="comma separated list of extra fields to include from the GFF3 annotation\ne.g. 'ID,translation,note' ")
@@ -155,8 +163,21 @@ attr_to_columns = attr_to_columns.assign(
 
 attr_to_columns['product'] = attr_to_columns['product'].apply(ul.parse.unquote)
 
+## fix to skip requested extra gff annotation field if not present in GFF
+drop_gff_extra = []
 for field in gff_extra:
-    attr_to_columns[field] = attr_to_columns[field].apply(ul.parse.unquote)
+    if field not in attr_to_columns:
+        print("Warning: Unable to find '" + field + "' in " + str(gff_file) + ' file, continuing...')
+        drop_gff_extra.append(field)
+
+gff_extra = [item for item in gff_extra if item not in drop_gff_extra]
+
+## Remove URL character encoding from columns  (skipping translation if present as this breaks the decoding
+for field in gff_extra:
+    if field == 'translation':
+        continue
+    else:
+        attr_to_columns[field] = attr_to_columns[field].apply(ul.parse.unquote)
 
 gff_columns_addback = attr_to_columns[['seq_id',
                                        'locus_tag',
@@ -165,7 +186,7 @@ gff_columns_addback = attr_to_columns[['seq_id',
                                        'end',
                                        'feat_length',
                                        'product'] + gff_extra]  # add extra fields from gff
-# attr_to_columns = attr_to_columns.dropna(axis=1, how='all')
+
 samfile = pysam.AlignmentFile(sam_file)  # without , "rb" should auto detect sam or bams
 open(sam_stem + ".bed", 'w').close()
 f = open(sam_stem + ".bed", "a")
@@ -186,11 +207,7 @@ STRAND = ["+", "-"]
 for read in samfile.fetch():
     if read.is_unmapped:
         continue
-    #   if read.infer_query_length == 25:
-    #   print(str(read.get_tag('NM')))
     NM_value = read.get_tag('NM')
-    # if not use_fraction_mismatch and NM_value > permitted_mismatch:
-    #    continue
     if fraction_mismatch:  # and NM_value > 0:
         if (read.query_alignment_length * fraction_mismatch[0]) > NM_value:
             continue
@@ -216,7 +233,7 @@ median_reads_at_site = round(coord_counts_df['counts'].median(), 2)
 
 mean_insertion_site_depth = round(number_of_reads_mapped / number_of_insertion_sites, 2)
 
-coord_counts_df = coord_counts_df[coord_counts_df['counts'] > min_depth_cutoff]
+coord_counts_df = coord_counts_df[coord_counts_df['counts'] >= min_depth_cutoff]
 
 # added .loc to fix warning
 # SettingWithCopyWarning:
@@ -282,13 +299,13 @@ pimms_result_table = pimms_result_table[['seq_id',
                                          'end',
                                          'feat_length',
                                          'product'] + gff_extra +
-                                        ['num_reads_mapped_per_feat',
+                                        ['num_insertions_mapped_per_feat',
                                          'num_insert_sites_per_feat',
                                          'num_insert_sites_per_feat_per_kb',
                                          'first_insert_posn_as_percentile',
                                          'last_insert_posn_as_percentile',
-                                         'NRM_score',
-                                         'NIM_score']]
+                                         'NRM_score',  # Normalised Reads Mapped
+                                         'NIM_score']]  # Normalised Insertions Mapped
 
 print(list(pimms_result_table.columns.values))
 
@@ -316,7 +333,7 @@ if parsed_args[0].label[0]:
                                    inplace=True)
 
 pimms_result_table_full.to_csv(sam_stem + "_countinfo_tab.txt", index=False, sep='\t')
-pimms_result_table_full.to_csv(sam_stem + "_countinfo_tab.csv", index=False, sep=',')
+pimms_result_table_full.to_csv(sam_stem + "_countinfo.csv", index=False, sep=',')
 
 writer = pd.ExcelWriter(sam_stem + '_countinfo.xlsx', engine='xlsxwriter')
 
