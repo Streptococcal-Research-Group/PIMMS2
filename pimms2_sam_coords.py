@@ -65,6 +65,8 @@ ap = configargparse.ArgumentParser(  # description='PIMMS2 sam/bam processing',
     description='''description here'''
 )
 ap.add_argument('--version', action='version', version='%(prog)s 2.0.1 demo')
+ap.add_argument('--nano', action='store_true', required=False,
+                help='global setting to change processing to nanopore data [False: illumina processing]')
 modes = ap.add_subparsers(parser_class=configargparse.ArgParser)
 
 # modes.required = False
@@ -111,13 +113,8 @@ print(ap.format_values())  # useful for logging where different settings came fr
 
 # print((vars(parsed_args)))
 # exit()
-# do config parsing
-# config_file = parsed_args.config_file[0]
 
-# construct config parser
-# p2config = configparser.ConfigParser()
 
-# p2config.read(config_file)
 # print("extra gff fields: " + (parsed_args.gff_extra))
 if parsed_args[0].gff_extra:
     # strip any formatting quotes and turn comma separated string into a list of fields
