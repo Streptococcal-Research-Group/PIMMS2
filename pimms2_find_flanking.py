@@ -1,19 +1,20 @@
-from argparse import _SubParsersAction
-import configparser
-import pathlib
+# from argparse import _SubParsersAction
+# import configparser
+# import pathlib
 from fuzzysearch import find_near_matches
 import os
 import time
 import sys
+import re
 import configargparse
-import gzip
 import datetime
 import multiprocessing
 import glob
 import gzip
-import base64
 import pysam
-from pathlib import Path
+
+
+#from pathlib import Path
 
 
 def createFolder(directory):
@@ -646,17 +647,12 @@ if not nano:  # nano == False
     print("illumina initial PIMMS filtering completed...\n")
     print(datetime.datetime.now())
 
-    # fqp_results_fwd = sorted(glob.glob(fastq_dir + "*_R1_*" + fq_result_suffix))
-    # fqp_results_rev = sorted(glob.glob(fastq_dir + "*_R2_*" + fq_result_suffix))
-    #  fqp_results_fwd = sorted(glob.glob(out_dir + "*_R1_*" + fq_result_suffix))
-    #  fqp_results_rev = sorted(glob.glob(out_dir + "*_R2_*" + fq_result_suffix))
-
-    ## match fwdrev match substrings e.g: _R1_/_R2_ftpm --fwdrev parameter
+    ## match fwdrev match substrings e.g: _R1_/_R2_ --fwdrev parameter
     fqp_results_fwd = sorted(glob.glob(os.path.join(out_dir, "*" + fwdrev_wc[0] + "*" + fq_result_suffix)))
     fqp_results_rev = sorted(glob.glob(os.path.join(out_dir, "*" + fwdrev_wc[1] + "*" + fq_result_suffix)))
     print(fqp_results_fwd)
     print(fqp_results_rev)
-    import re
+    #
 
     for fwd_fqp_result, rev_fqp_result in zip(fqp_results_fwd, fqp_results_rev):
         result1_reads_list = []

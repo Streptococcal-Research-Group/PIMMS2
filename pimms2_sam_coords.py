@@ -1,14 +1,16 @@
 import os
 import sys
-import datetime
-import multiprocessing
+# import datetime
+# import multiprocessing
 import pandas as pd
 import gffpandas.gffpandas as gffpd
 import pandasql as ps
 import pysam
 import urllib as ul
 import configargparse
-import warnings
+
+
+#import warnings
 
 # from configargparse import _SubParsersAction
 # import configparser
@@ -145,6 +147,8 @@ gff_feat_type = ['CDS', 'tRNA', 'rRNA']
 
 annotation = gffpd.read_gff3(gff_file)
 annotation = annotation.filter_feature_of_type(gff_feat_type)
+
+annotation.to_gff3('temp_features.gff')
 # break 9th gff column key=value pairs down to make additional columns
 attr_to_columns = annotation.attributes_to_columns()
 # attr_to_columns = attr_to_columns[attr_to_columns['type'] == gff_feat_type]  # filter to CDS
@@ -174,7 +178,8 @@ for field in gff_extra:
     if field == 'translation':
         continue
     else:
-        attr_to_columns[field] = attr_to_columns[field].apply(ul.parse.unquote)
+        attr_to_columns[field] = attr_to_columns[field].fillna('').astype(str).apply(
+            ul.parse.unquote)  # added fix for None datatype
 
 gff_columns_addback = attr_to_columns[['seq_id',
                                        'locus_tag',
@@ -221,7 +226,7 @@ f2.close()
 
 coord_df = pd.read_csv(sam_stem + ".insert_coords.txt", sep='\t', dtype={'ref_name': "str", 'coord': "int64"})
 coord_counts_df = coord_df.groupby(['ref_name', 'coord']).size().reset_index(name='counts')
-
+#print(coord_counts_df.head())
 number_of_insertion_sites = len(coord_counts_df)
 number_of_reads_mapped = coord_counts_df['counts'].sum()
 min_reads_at_site = coord_counts_df['counts'].min()
@@ -231,6 +236,20 @@ median_reads_at_site = round(coord_counts_df['counts'].median(), 2)
 mean_insertion_site_depth = round(number_of_reads_mapped / number_of_insertion_sites, 2)
 
 coord_counts_df = coord_counts_df[coord_counts_df['counts'] >= min_depth_cutoff]
+
+coord_counts_df_pimms2_gff = coord_counts_df.reset_index()
+
+coord_counts_df_pimms2_gff['source'] = 'pimms'
+coord_counts_df_pimms2_gff['feature_type'] = 'misc_feature'
+coord_counts_df_pimms2_gff['strand'] = '.'
+coord_counts_df_pimms2_gff['phase'] = '.'
+coord_counts_df_pimms2_gff['stop'] = coord_counts_df_pimms2_gff['coord']
+coord_counts_df_pimms2_gff = coord_counts_df_pimms2_gff.rename(columns={'counts': 'score', 'coord': 'start'})
+coord_counts_df_pimms2_gff['info'] = 'note=insertion;'
+coord_counts_df_pimms2_gff = coord_counts_df_pimms2_gff[
+    ['ref_name', 'source', 'feature_type', 'start', 'stop', 'score', 'strand', 'phase', 'info']]
+print(coord_counts_df_pimms2_gff.head())
+coord_counts_df_pimms2_gff.to_csv("pimms_" + parsed_args[0].label[0] + ".gff", index=False, sep='\t', header=False)
 
 # added .loc to fix warning
 # SettingWithCopyWarning:
@@ -272,7 +291,7 @@ print(list(attr_to_columns.columns.values))
 
 pimms_result_table = coords_join_gff.groupby(
     ['seq_id', 'locus_tag', 'gene', 'start', 'end', 'feat_length', 'product'] + gff_extra).agg(
-    num_reads_mapped_per_feat=('counts', 'sum'),
+    num_insertions_mapped_per_feat=('counts', 'sum'),
     num_insert_sites_per_feat=('counts', 'count'),
     first_insert_posn_as_percentile=('posn_as_percentile', 'min'),
     last_insert_posn_as_percentile=('posn_as_percentile', 'max')
@@ -280,7 +299,7 @@ pimms_result_table = coords_join_gff.groupby(
 
 pimms_result_table = pimms_result_table.assign(num_insert_sites_per_feat_per_kb=(
         (pimms_result_table.num_insert_sites_per_feat / pimms_result_table.feat_length) * 1000),
-    NRM_score=((pimms_result_table.num_reads_mapped_per_feat / (
+    NRM_score=((pimms_result_table.num_insertions_mapped_per_feat / (
             pimms_result_table.feat_length / 1000)) / (
                        number_of_reads_mapped / 1e6)),
     NIM_score=((pimms_result_table.num_insert_sites_per_feat / (
@@ -308,7 +327,7 @@ print(list(pimms_result_table.columns.values))
 
 # pimms_result_table_full gff_columns_addback
 
-NAvalues = {'num_reads_mapped_per_feat': int(0),
+NAvalues = {'num_insertions_mapped_per_feat': int(0),
             'num_insert_sites_per_feat': int(0),
             'num_insert_sites_per_feat_per_kb': int(0),
             'first_insert_posn_as_percentile': int(0),
@@ -319,7 +338,7 @@ pimms_result_table_full = pd.merge(gff_columns_addback, pimms_result_table, how=
 
 # if set add prefix to columns
 if parsed_args[0].label[0]:
-    label_cols = pimms_result_table_full.columns[pimms_result_table_full.columns.isin(['num_reads_mapped_per_feat',
+    label_cols = pimms_result_table_full.columns[pimms_result_table_full.columns.isin(['num_insertions_mapped_per_feat',
                                                                                        'num_insert_sites_per_feat',
                                                                                        'num_insert_sites_per_feat_per_kb',
                                                                                        'first_insert_posn_as_percentile',
