@@ -13,6 +13,12 @@ import glob
 import gzip
 import pysam
 
+import logging
+import logging.handlers
+
+
+# from time import sleep
+# from random import random, randint
 
 #from pathlib import Path
 

@@ -4,10 +4,12 @@ import datetime
 # import multiprocessing
 # import pysam
 import pandas as pd
-# import gffpandas.gffpandas as gffpd
+#import gffpandas.gffpandas as gffpd
 import pandasql as ps
 
+
 import configargparse
+
 
 ap = configargparse.ArgumentParser(  # description='PIMMS2 sam/bam processing',
     prog="demo_pimms2_compare",
@@ -32,9 +34,9 @@ compare.add_argument("-c", "--config", required=False, is_config_file=True,  # d
                      # type=str, default='',
                      metavar='pimms2.config',
                      help="use parameters from config file")
-compare.add_argument("--result1", required=True, nargs=1, metavar='pimms.sam/bam',
+compare.add_argument("--result1", required=True, nargs=1,  # metavar='pimms.sam/bam',
                      help="pimms result files condition 1 ")
-compare.add_argument("--result2", required=True, nargs=1, metavar='pimms.sam/bam',
+compare.add_argument("--result2", required=True, nargs=1,  # metavar='pimms.sam/bam',
                      help="pimms result files condition 2 ")
 compare.add_argument("--label1", required=True, nargs=1, metavar='condition_one',
                      help="text tag for condition one")
@@ -58,20 +60,23 @@ print("----------")
 print("----------")
 print(ap.format_values())  # useful for logging where different settings came from
 
-= "UK15_Media_RX_pimms2out_trim60_v_pGh9_UK15_md1_mm_countinfo_tab.txt"
-result2 = "UK15_Blood_RX_pimms2out_trim60_v_pGh9_UK15_md1_mm_countinfo_tab.txt"
-label1 = "media"
-label2 = "blood"
+result1 = "S.uberis_0140J_test.IN_RX__pimms2out_trim60_sub1_md2_mm_countinfo_tab.txt"
+result2 = "S.uberis_0140J_test.OUT_RX__pimms2out_trim60_sub1_md2_mm_countinfo_tab.txt"
+label1 = "test.IN"
+label2 = "test.OUT"
 
 result1_df = pd.read_csv(result1, sep='\t')
 result2_df = pd.read_csv(result2, sep='\t')
-result1_df = result1_df.filter(regex='^media|seq_id|locus_tag', axis=1)
+result1_df = result1_df.filter(regex='^test|seq_id|locus_tag', axis=1)
 # result1_df = result1_df[result1_df[label1 + '_num_reads_mapped_per_feat'] > 0]
-# result2_df = result2_df[result2_df[label2 + '_num_reads_mapped_per_feat'] > 0]
+#result2_df = result2_df[result2_df[label2 + '_num_reads_mapped_per_feat'] > 0]
 
 result1_2_df = pd.DataFrame.merge(result1_df, result2_df, how='outer', on=["seq_id", "locus_tag"])
-result1_2_filt_df = result1_2_df[(result1_2_df[label1 + '_' + 'num_reads_mapped_per_feat'] > 0) |
-                                 (result1_2_df[label2 + '_' + 'num_reads_mapped_per_feat'] > 0)]
+result1_2_filt_df = result1_2_df[(result1_2_df[label1 + '_' + 'num_insertions_mapped_per_feat'] >= 1) |
+                                 (result1_2_df[label2 + '_' + 'num_insertions_mapped_per_feat'] >= 1)]
 
-result1_2_filt_df = result1_2_filt_df.insert(2, NIM_diff=(
-        (pimms_result_table.num_insert_sites_per_feat / pimms_result_table.feat_length) * 1000
+# result1_2_filt_df = result1_2_filt_df.insert(NIM_diff=(
+#       (result1_2_filt_df.media_NIM_score - result1_2_filt_df.blood_NIM_score) ))
+result1_2_filt_df = result1_2_filt_df.assign(
+    NIM_diff=(result1_2_filt_df['test.IN_NIM_score'] - result1_2_filt_df['test.OUT_NIM_score']))
+result1_2_filt_df.to_csv(label1 + '_' + label2 + '_filt_df.txt', sep='\t')
