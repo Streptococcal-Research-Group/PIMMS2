@@ -55,9 +55,234 @@ def extant_file(x):
     return x
 
 
+def process_gff(gff_file, gff_feat_type, gff_extra):
+    annotation = gffpd.read_gff3(gff_file)
+    annotation = annotation.filter_feature_of_type(gff_feat_type)
+
+    gff_stem, gff_ext = os.path.splitext(os.path.basename(gff_file))
+
+    annotation.to_gff3(gff_stem + '_pimms_features.gff')
+    # break 9th gff column key=value pairs down to make additional columns
+    attr_to_columns = annotation.attributes_to_columns()
+    # attr_to_columns = attr_to_columns[attr_to_columns['type'] == gff_feat_type]  # filter to CDS
+    # attr_to_columns = attr_to_columns.filter_feature_of_type(gff_feat_type)  # filter to gff_feat_type = ['CDS', 'tRNA', 'rRNA']
+    # add feature length column and do some cleanup
+    attr_to_columns = attr_to_columns.assign(
+        feat_length=(attr_to_columns.end - attr_to_columns.start + 1)).dropna(axis=1,
+                                                                              how='all').drop(columns=['attributes'])
+
+    # remove RFC 3986 % encoding from product (gff3 attribute)
+    # attr_to_columns = attr_to_columns.assign(product_nopc=attr_to_columns['product'].apply(ul.parse.unquote)).drop(
+    #    columns=['product']).rename(columns={'product_nopc': 'product'})
+
+    attr_to_columns['product'] = attr_to_columns['product'].apply(ul.parse.unquote)
+
+    ## fix to skip requested extra gff annotation field if not present in GFF
+    drop_gff_extra = []
+    for field in gff_extra:
+        if field not in attr_to_columns:
+            print("Warning: Unable to find '" + field + "' in " + str(gff_file) + ' file, continuing...')
+            drop_gff_extra.append(field)
+
+    gff_extra = [item for item in gff_extra if item not in drop_gff_extra]
+
+    ## Remove URL character encoding from columns  (skipping translation if present as this breaks the decoding
+    for field in gff_extra:
+        if field == 'translation':
+            continue
+        else:
+            attr_to_columns[field] = attr_to_columns[field].fillna('').astype(str).apply(
+                ul.parse.unquote)  # added fix for None datatype
+
+    gff_columns_addback = attr_to_columns[['seq_id',
+                                           'locus_tag',
+                                           'gene',
+                                           'start',
+                                           'end',
+                                           'feat_length',
+                                           'product'] + gff_extra]  # add extra fields from gff
+
+    return gff_columns_addback, attr_to_columns
+    # end process_gff()
+
+
+def modify_sam_stem(sam_file):
+    sam_stem, sam_ext = os.path.splitext(os.path.basename(sam_file))
+    sam_stem: str = sam_stem + '_md' + str(min_depth_cutoff) + '_mm' + str(fraction_mismatch or '')
+    return sam_stem
+
+
+def process_sam(sam_file):
+    sam_stem = modify_sam_stem(sam_file)
+    samfile = pysam.AlignmentFile(sam_file)  # without , "rb" should auto detect sam or bams
+    open(sam_stem + ".bed", 'w').close()
+    f = open(sam_stem + ".bed", "a")
+
+    STRAND = ["+", "-"]
+    for read in samfile.fetch():
+        STR = STRAND[int(read.is_reverse)]
+        BED = [read.reference_name, read.pos, read.reference_end, ".", read.mapping_quality, STR,
+               '# ' + read.query_name]
+        f.write('\t'.join([str(i) for i in BED]))
+        f.write('\n')
+    f.close()
+
+    open(sam_stem + "_insert_coords.txt", 'w').close()
+    f2 = open(sam_stem + "_insert_coords.txt", "a")
+    f2.write('\t'.join([str(i) for i in ['ref_name', 'coord', 'strand', 'read_name']]))
+    f2.write('\n')
+    STRAND = ["+", "-"]
+    for read in samfile.fetch():
+        if read.is_unmapped:
+            continue
+        NM_value = read.get_tag('NM')
+        if fraction_mismatch:  # and NM_value > 0:
+            if (read.query_alignment_length * fraction_mismatch[0]) > NM_value:
+                continue
+        STR = STRAND[int(read.is_reverse)]  # coverts is_reverse boolean into + or - strings
+        if STR == '+':
+            COORDS = [read.reference_name, (read.reference_start + 4), STR, '# ' + read.query_name]
+            f2.write('\t'.join([str(i) for i in COORDS]))
+            f2.write('\n')
+        if STR == '-':
+            COORDS = [read.reference_name, (read.reference_end - 4), STR, '# ' + read.query_name]
+            f2.write('\t'.join([str(i) for i in COORDS]))
+            f2.write('\n')
+    f2.close()
+    # end process_sam()
+
+
+def coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, condition_label):
+    coord_df = pd.read_csv(sam_stem + "_insert_coords.txt", sep='\t', dtype={'ref_name': "str", 'coord': "int64"})
+    coord_counts_df = coord_df.groupby(['ref_name', 'coord']).size().reset_index(name='counts')
+    # print(coord_counts_df.head())
+    number_of_insertion_sites = len(coord_counts_df)
+    number_of_reads_mapped = coord_counts_df['counts'].sum()
+    min_reads_at_site = coord_counts_df['counts'].min()
+    max_reads_at_site = coord_counts_df['counts'].max()
+    median_reads_at_site = round(coord_counts_df['counts'].median(), 2)
+
+    mean_insertion_site_depth = round(number_of_reads_mapped / number_of_insertion_sites, 2)
+
+    coord_counts_df = coord_counts_df[coord_counts_df['counts'] >= min_depth_cutoff]
+
+    coord_counts_df_pimms2_gff = coord_counts_df.reset_index()
+
+    coord_counts_df_pimms2_gff['source'] = 'pimms'
+    coord_counts_df_pimms2_gff['feature_type'] = 'misc_feature'
+    coord_counts_df_pimms2_gff['strand'] = '.'
+    coord_counts_df_pimms2_gff['phase'] = '.'
+    coord_counts_df_pimms2_gff['stop'] = coord_counts_df_pimms2_gff['coord']
+    coord_counts_df_pimms2_gff = coord_counts_df_pimms2_gff.rename(columns={'counts': 'score', 'coord': 'start'})
+    coord_counts_df_pimms2_gff['info'] = 'note=insertion;'
+    coord_counts_df_pimms2_gff = coord_counts_df_pimms2_gff[
+        ['ref_name', 'source', 'feature_type', 'start', 'stop', 'score', 'strand', 'phase', 'info']]
+    print(coord_counts_df_pimms2_gff.head())
+    coord_counts_df_pimms2_gff.to_csv("pimms_" + condition_label + ".gff", index=False, sep='\t', header=False)
+
+    # added .loc to fix warning
+    # SettingWithCopyWarning:
+    # A value is trying to be set on a copy of a slice from a DataFrame.
+    # Try using .loc[row_indexer,col_indexer] = value instead
+    # coord_counts_df = \
+    coord_counts_df.loc[:, 'between_insertion_gap'] = coord_counts_df.groupby(['ref_name'])['coord'].diff()
+    # coord_counts_df = coord_counts_df.loc[:, 'between_insertion_gap'] = coord_counts_df['coord'].diff()
+    # coord_counts_gt1_df = coord_counts_gt1_df({'between_insertion_gap': 0})
+
+    min_between_insertion_gap = coord_counts_df['between_insertion_gap'].min()
+    max_between_insertion_gap = coord_counts_df['between_insertion_gap'].max()
+    median_between_insertion_gap = coord_counts_df['between_insertion_gap'].median()
+    mean_between_insertion_gap = round(coord_counts_df['between_insertion_gap'].mean(), 2)
+
+    sqlcode = '''
+        select coord_counts_df.*
+        ,attr_to_columns.*
+        from attr_to_columns
+        left join coord_counts_df
+        on coord_counts_df.coord between attr_to_columns.start and attr_to_columns.end
+        where coord_counts_df.ref_name like '%' || attr_to_columns.seq_id || '%'
+        '''
+    ## wierd sqlite concatenation + >> || ,  '%' == wildcard double check effect of this
+    # this line should allow multi contig files
+
+    coords_join_gff = ps.sqldf(sqlcode, locals())
+    coords_join_gff.count
+    ## add position as percentile (needs manual confirmation)
+    coords_join_gff = coords_join_gff.assign(
+        # python/pandas implementation of PIMMS.pl code to derive insert position as percentile of gene length
+        # sprintf("%.1f", ((($in-$in_start)+1) / ($in_length/100)));
+        # sprintf("%.1f", ((($in_stop-$ in) + 1) / ($in_length / 100)));
+        posn_as_percentile=(((coords_join_gff.coord - coords_join_gff.start) + 1) / (
+                coords_join_gff.feat_length / 100)).where(
+            coords_join_gff.strand == '+', ((coords_join_gff.end - coords_join_gff.coord) + 1) / (
+                    coords_join_gff.feat_length / 100))).round({"posn_as_percentile": 1})
+    print(list(attr_to_columns.columns.values))
+
+    pimms_result_table = coords_join_gff.groupby(
+        ['seq_id', 'locus_tag', 'gene', 'start', 'end', 'feat_length', 'product'] + gff_extra).agg(
+        num_insertions_mapped_per_feat=('counts', 'sum'),
+        num_insert_sites_per_feat=('counts', 'count'),
+        first_insert_posn_as_percentile=('posn_as_percentile', 'min'),
+        last_insert_posn_as_percentile=('posn_as_percentile', 'max')
+    ).reset_index()
+
+    pimms_result_table = pimms_result_table.assign(num_insert_sites_per_feat_per_kb=(
+            (pimms_result_table.num_insert_sites_per_feat / pimms_result_table.feat_length) * 1000),
+        NRM_score=((pimms_result_table.num_insertions_mapped_per_feat / (
+                pimms_result_table.feat_length / 1000)) / (
+                           number_of_reads_mapped / 1e6)),
+        NIM_score=((pimms_result_table.num_insert_sites_per_feat / (
+                pimms_result_table.feat_length / 1000)) / (
+                           number_of_reads_mapped / 1e6))
+    ).round({'num_insert_sites_per_feat_per_kb': 2, 'NRM_score': 2, 'NIM_score': 2})
+    print(list(pimms_result_table.columns.values))
+
+    pimms_result_table = pimms_result_table[['seq_id',
+                                             'locus_tag',
+                                             'gene',
+                                             'start',
+                                             'end',
+                                             'feat_length',
+                                             'product'] + gff_extra +
+                                            ['num_insertions_mapped_per_feat',
+                                             'num_insert_sites_per_feat',
+                                             'num_insert_sites_per_feat_per_kb',
+                                             'first_insert_posn_as_percentile',
+                                             'last_insert_posn_as_percentile',
+                                             'NRM_score',  # Normalised Reads Mapped
+                                             'NIM_score']]  # Normalised Insertions Mapped
+
+    print(list(pimms_result_table.columns.values))
+
+    # pimms_result_table_full gff_columns_addback
+
+    NAvalues = {'num_insertions_mapped_per_feat': int(0),
+                'num_insert_sites_per_feat': int(0),
+                'num_insert_sites_per_feat_per_kb': int(0),
+                'first_insert_posn_as_percentile': int(0),
+                'last_insert_posn_as_percentile': int(0),
+                'NRM_score': int(0),
+                'NIM_score': int(0)}
+    pimms_result_table_full = pd.merge(gff_columns_addback, pimms_result_table, how='left').fillna(value=NAvalues)
+
+    # if set add prefix to columns
+    if condition_label:
+        label_cols = pimms_result_table_full.columns[
+            pimms_result_table_full.columns.isin(['num_insertions_mapped_per_feat',
+                                                  'num_insert_sites_per_feat',
+                                                  'num_insert_sites_per_feat_per_kb',
+                                                  'first_insert_posn_as_percentile',
+                                                  'last_insert_posn_as_percentile',
+                                                  'NRM_score',
+                                                  'NIM_score'])]
+        pimms_result_table_full.rename(columns=dict(zip(label_cols, condition_label + '_' + label_cols)),
+                                       inplace=True)
+
+    return pimms_result_table_full
+    # end of coordinates_to_features()
+
 # main function
 # def main():
-from gffpandas.gffpandas import Gff3DataFrame
 
 ap = configargparse.ArgumentParser(  # description='PIMMS2 sam/bam processing',
     prog="demo_pimms2_sam_extract",
@@ -113,11 +338,10 @@ print("----------")
 print("----------")
 print(ap.format_values())  # useful for logging where different settings came from
 
-# print((vars(parsed_args)))
 # exit()
 
 
-# print("extra gff fields: " + (parsed_args.gff_extra))
+# sort out extra requested gff annotation fields
 if parsed_args[0].gff_extra:
     # strip any formatting quotes and turn comma separated string into a list of fields
     gff_extra = parsed_args[0].gff_extra[0].strip("'\"").split(',')
@@ -125,237 +349,46 @@ else:
     gff_extra = []
 
 print("extra gff fields: " + str(gff_extra))
+gff_file = parsed_args[0].gff[0]
+gff_feat_type = ['CDS', 'tRNA', 'rRNA']
+# process the gff file to get required fields
+gff_columns_addback, attr_to_columns = process_gff(gff_file, gff_feat_type,
+                                                   gff_extra)  # trap multiple return values from function
+# gff_file = '/Users/svzaw/Data/PIMMS_redo/PIMMS2_stuff/PIMMS_V1/S.uberis_0140J.gff3'
+# gff_file = 'UK15_assembly_fix03.gff'
+
 
 # exit()
+# set up various variables and commandline parameters
 use_fraction_mismatch = True
 min_depth_cutoff = parsed_args[0].min_depth[0]
 # permitted_mismatch = 6
 fraction_mismatch = parsed_args[0].mismatch[0]
 # sam_file = "0140J_test.IN.PIMMS.RX.rmIS.sub0_min25_max50.ngm_sensitive.90pc.bam"
-
 # sam_file = "UK15_Media_RX_pimms2out_trim60_v_pGh9_UK15.bam"
 # sam_file = "UK15_Blood_RX_pimms2out_trim60_v_pGh9_UK15.bam"
 sam_file = parsed_args[0].sam[0]
-sam_stem, sam_ext = os.path.splitext(os.path.basename(sam_file))
-sam_stem = sam_stem + '_md' + str(min_depth_cutoff) + '_mm' + str(fraction_mismatch or '')
-# gff_file = '/Users/svzaw/Data/PIMMS_redo/PIMMS2_stuff/PIMMS_V1/S.uberis_0140J.gff3'
-# gff_file = 'UK15_assembly_fix03.gff'
-gff_file = parsed_args[0].gff[0]
-gff_feat_type = ['CDS', 'tRNA', 'rRNA']
+condition_label = parsed_args[0].label[0]
 
-# exit()
+# sam_stem, sam_ext = os.path.splitext(os.path.basename(sam_file))
+# sam_stem = sam_stem + '_md' + str(min_depth_cutoff) + '_mm' + str(fraction_mismatch or '')
 
-annotation = gffpd.read_gff3(gff_file)
-annotation = annotation.filter_feature_of_type(gff_feat_type)
 
-annotation.to_gff3('temp_features.gff')
-# break 9th gff column key=value pairs down to make additional columns
-attr_to_columns = annotation.attributes_to_columns()
-# attr_to_columns = attr_to_columns[attr_to_columns['type'] == gff_feat_type]  # filter to CDS
-# attr_to_columns = attr_to_columns.filter_feature_of_type(gff_feat_type)  # filter to gff_feat_type = ['CDS', 'tRNA', 'rRNA']
-# add feature length column and do some cleanup
-attr_to_columns = attr_to_columns.assign(
-    feat_length=(attr_to_columns.end - attr_to_columns.start + 1)).dropna(axis=1,
-                                                                          how='all').drop(columns=['attributes'])
+# process pimms sam/bam  file and produce coordinate / bed files
+process_sam(sam_file)
 
-# remove RFC 3986 % encoding from product (gff3 attribute)
-# attr_to_columns = attr_to_columns.assign(product_nopc=attr_to_columns['product'].apply(ul.parse.unquote)).drop(
-#    columns=['product']).rename(columns={'product_nopc': 'product'})
+sam_stem = modify_sam_stem(sam_file)
 
-attr_to_columns['product'] = attr_to_columns['product'].apply(ul.parse.unquote)
+# allocate insertions to features and create results merged with GFF
+# possibly poor coding to merge with gff here
+pimms_result_table_full = coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, condition_label)
 
-## fix to skip requested extra gff annotation field if not present in GFF
-drop_gff_extra = []
-for field in gff_extra:
-    if field not in attr_to_columns:
-        print("Warning: Unable to find '" + field + "' in " + str(gff_file) + ' file, continuing...')
-        drop_gff_extra.append(field)
-
-gff_extra = [item for item in gff_extra if item not in drop_gff_extra]
-
-## Remove URL character encoding from columns  (skipping translation if present as this breaks the decoding
-for field in gff_extra:
-    if field == 'translation':
-        continue
-    else:
-        attr_to_columns[field] = attr_to_columns[field].fillna('').astype(str).apply(
-            ul.parse.unquote)  # added fix for None datatype
-
-gff_columns_addback = attr_to_columns[['seq_id',
-                                       'locus_tag',
-                                       'gene',
-                                       'start',
-                                       'end',
-                                       'feat_length',
-                                       'product'] + gff_extra]  # add extra fields from gff
-
-samfile = pysam.AlignmentFile(sam_file)  # without , "rb" should auto detect sam or bams
-open(sam_stem + ".bed", 'w').close()
-f = open(sam_stem + ".bed", "a")
-
-STRAND = ["+", "-"]
-for read in samfile.fetch():
-    STR = STRAND[int(read.is_reverse)]
-    BED = [read.reference_name, read.pos, read.reference_end, ".", read.mapping_quality, STR, '# ' + read.query_name]
-    f.write('\t'.join([str(i) for i in BED]))
-    f.write('\n')
-f.close()
-
-open(sam_stem + ".insert_coords.txt", 'w').close()
-f2 = open(sam_stem + ".insert_coords.txt", "a")
-f2.write('\t'.join([str(i) for i in ['ref_name', 'coord', 'strand', 'read_name']]))
-f2.write('\n')
-STRAND = ["+", "-"]
-for read in samfile.fetch():
-    if read.is_unmapped:
-        continue
-    NM_value = read.get_tag('NM')
-    if fraction_mismatch:  # and NM_value > 0:
-        if (read.query_alignment_length * fraction_mismatch[0]) > NM_value:
-            continue
-    STR = STRAND[int(read.is_reverse)]  # coverts is_reverse boolean into + or - strings
-    if STR == '+':
-        COORDS = [read.reference_name, (read.reference_start + 4), STR, '# ' + read.query_name]
-        f2.write('\t'.join([str(i) for i in COORDS]))
-        f2.write('\n')
-    if STR == '-':
-        COORDS = [read.reference_name, (read.reference_end - 4), STR, '# ' + read.query_name]
-        f2.write('\t'.join([str(i) for i in COORDS]))
-        f2.write('\n')
-f2.close()
-
-coord_df = pd.read_csv(sam_stem + ".insert_coords.txt", sep='\t', dtype={'ref_name': "str", 'coord': "int64"})
-coord_counts_df = coord_df.groupby(['ref_name', 'coord']).size().reset_index(name='counts')
-#print(coord_counts_df.head())
-number_of_insertion_sites = len(coord_counts_df)
-number_of_reads_mapped = coord_counts_df['counts'].sum()
-min_reads_at_site = coord_counts_df['counts'].min()
-max_reads_at_site = coord_counts_df['counts'].max()
-median_reads_at_site = round(coord_counts_df['counts'].median(), 2)
-
-mean_insertion_site_depth = round(number_of_reads_mapped / number_of_insertion_sites, 2)
-
-coord_counts_df = coord_counts_df[coord_counts_df['counts'] >= min_depth_cutoff]
-
-coord_counts_df_pimms2_gff = coord_counts_df.reset_index()
-
-coord_counts_df_pimms2_gff['source'] = 'pimms'
-coord_counts_df_pimms2_gff['feature_type'] = 'misc_feature'
-coord_counts_df_pimms2_gff['strand'] = '.'
-coord_counts_df_pimms2_gff['phase'] = '.'
-coord_counts_df_pimms2_gff['stop'] = coord_counts_df_pimms2_gff['coord']
-coord_counts_df_pimms2_gff = coord_counts_df_pimms2_gff.rename(columns={'counts': 'score', 'coord': 'start'})
-coord_counts_df_pimms2_gff['info'] = 'note=insertion;'
-coord_counts_df_pimms2_gff = coord_counts_df_pimms2_gff[
-    ['ref_name', 'source', 'feature_type', 'start', 'stop', 'score', 'strand', 'phase', 'info']]
-print(coord_counts_df_pimms2_gff.head())
-coord_counts_df_pimms2_gff.to_csv("pimms_" + parsed_args[0].label[0] + ".gff", index=False, sep='\t', header=False)
-
-# added .loc to fix warning
-# SettingWithCopyWarning:
-# A value is trying to be set on a copy of a slice from a DataFrame.
-# Try using .loc[row_indexer,col_indexer] = value instead
-# coord_counts_df = \
-coord_counts_df.loc[:, 'between_insertion_gap'] = coord_counts_df.groupby(['ref_name'])['coord'].diff()
-# coord_counts_df = coord_counts_df.loc[:, 'between_insertion_gap'] = coord_counts_df['coord'].diff()
-# coord_counts_gt1_df = coord_counts_gt1_df({'between_insertion_gap': 0})
-
-min_between_insertion_gap = coord_counts_df['between_insertion_gap'].min()
-max_between_insertion_gap = coord_counts_df['between_insertion_gap'].max()
-median_between_insertion_gap = coord_counts_df['between_insertion_gap'].median()
-mean_between_insertion_gap = round(coord_counts_df['between_insertion_gap'].mean(), 2)
-
-sqlcode = '''
-    select coord_counts_df.*
-    ,attr_to_columns.*
-    from attr_to_columns
-    left join coord_counts_df
-    on coord_counts_df.coord between attr_to_columns.start and attr_to_columns.end
-    where coord_counts_df.ref_name like '%' || attr_to_columns.seq_id || '%'
-    '''
-## wierd sqlite concatenation + >> || ,  '%' == wildcard double check effect of this
-# this line should allow multi contig files
-
-coords_join_gff = ps.sqldf(sqlcode, locals())
-coords_join_gff.count
-## add position as percentile (needs manual confirmation)
-coords_join_gff = coords_join_gff.assign(
-    # python/pandas implementation of PIMMS.pl code to derive insert position as percentile of gene length
-    # sprintf("%.1f", ((($in-$in_start)+1) / ($in_length/100)));
-    # sprintf("%.1f", ((($in_stop-$ in) + 1) / ($in_length / 100)));
-    posn_as_percentile=(((coords_join_gff.coord - coords_join_gff.start) + 1) / (
-            coords_join_gff.feat_length / 100)).where(
-        coords_join_gff.strand == '+', ((coords_join_gff.end - coords_join_gff.coord) + 1) / (
-                coords_join_gff.feat_length / 100))).round({"posn_as_percentile": 1})
-print(list(attr_to_columns.columns.values))
-
-pimms_result_table = coords_join_gff.groupby(
-    ['seq_id', 'locus_tag', 'gene', 'start', 'end', 'feat_length', 'product'] + gff_extra).agg(
-    num_insertions_mapped_per_feat=('counts', 'sum'),
-    num_insert_sites_per_feat=('counts', 'count'),
-    first_insert_posn_as_percentile=('posn_as_percentile', 'min'),
-    last_insert_posn_as_percentile=('posn_as_percentile', 'max')
-).reset_index()
-
-pimms_result_table = pimms_result_table.assign(num_insert_sites_per_feat_per_kb=(
-        (pimms_result_table.num_insert_sites_per_feat / pimms_result_table.feat_length) * 1000),
-    NRM_score=((pimms_result_table.num_insertions_mapped_per_feat / (
-            pimms_result_table.feat_length / 1000)) / (
-                       number_of_reads_mapped / 1e6)),
-    NIM_score=((pimms_result_table.num_insert_sites_per_feat / (
-            pimms_result_table.feat_length / 1000)) / (
-                       number_of_reads_mapped / 1e6))
-).round({'num_insert_sites_per_feat_per_kb': 2, 'NRM_score': 2, 'NIM_score': 2})
-print(list(pimms_result_table.columns.values))
-
-pimms_result_table = pimms_result_table[['seq_id',
-                                         'locus_tag',
-                                         'gene',
-                                         'start',
-                                         'end',
-                                         'feat_length',
-                                         'product'] + gff_extra +
-                                        ['num_insertions_mapped_per_feat',
-                                         'num_insert_sites_per_feat',
-                                         'num_insert_sites_per_feat_per_kb',
-                                         'first_insert_posn_as_percentile',
-                                         'last_insert_posn_as_percentile',
-                                         'NRM_score',  # Normalised Reads Mapped
-                                         'NIM_score']]  # Normalised Insertions Mapped
-
-print(list(pimms_result_table.columns.values))
-
-# pimms_result_table_full gff_columns_addback
-
-NAvalues = {'num_insertions_mapped_per_feat': int(0),
-            'num_insert_sites_per_feat': int(0),
-            'num_insert_sites_per_feat_per_kb': int(0),
-            'first_insert_posn_as_percentile': int(0),
-            'last_insert_posn_as_percentile': int(0),
-            'NRM_score': int(0),
-            'NIM_score': int(0)}
-pimms_result_table_full = pd.merge(gff_columns_addback, pimms_result_table, how='left').fillna(value=NAvalues)
-
-# if set add prefix to columns
-if parsed_args[0].label[0]:
-    label_cols = pimms_result_table_full.columns[pimms_result_table_full.columns.isin(['num_insertions_mapped_per_feat',
-                                                                                       'num_insert_sites_per_feat',
-                                                                                       'num_insert_sites_per_feat_per_kb',
-                                                                                       'first_insert_posn_as_percentile',
-                                                                                       'last_insert_posn_as_percentile',
-                                                                                       'NRM_score',
-                                                                                       'NIM_score'])]
-    pimms_result_table_full.rename(columns=dict(zip(label_cols, parsed_args[0].label[0] + '_' + label_cols)),
-                                   inplace=True)
-
-pimms_result_table_full.to_csv(sam_stem + "_countinfo_tab.txt", index=False, sep='\t')
-pimms_result_table_full.to_csv(sam_stem + "_countinfo.csv", index=False, sep=',')
-
+# write results as text/excel
+pimms_result_table_full.to_csv(sam_stem + "countinfo_tab.txt", index=False, sep='\t')
+pimms_result_table_full.to_csv(sam_stem + "countinfo.csv", index=False, sep=',')
 writer = pd.ExcelWriter(sam_stem + '_countinfo.xlsx', engine='xlsxwriter')
-
 # Convert the dataframe to an XlsxWriter Excel object.
 pimms_result_table_full.to_excel(writer, sheet_name='PIMMS2_result', index=False)
-
 # Close the Pandas Excel writer and output the Excel file.
 writer.save()
 
