@@ -8,9 +8,10 @@ import pandasql as ps
 import pysam
 import urllib as ul
 import configargparse
+import shutil
 
 
-#import warnings
+# import warnings
 
 # from configargparse import _SubParsersAction
 # import configparser
@@ -18,23 +19,7 @@ import configargparse
 
 # import configparser
 #
-# sub get_position_as_percentile_pos{
-# my $in = $_;
-# my $in_locus  = $locus_lookup{$_};
-# my $in_length = $length_lookup{$in_locus};
-# my $in_start = $start_lookup{$in_locus};
-# my $percentile =  sprintf("%.1f", ((($in-$in_start)+1) / ($in_length/100)));
-# return $percentile;
-# }
-#
-# sub get_position_as_percentile_neg{
-# my $in = $_;
-# my $in_locus  = $locus_lookup{$_};
-# my $in_length = $length_lookup{$in_locus};
-# my $in_stop = $stop_lookup{$in_locus};
-# my $percentile =  sprintf("%.1f", ((($in_stop-$in)+1) / ($in_length/100)));
-# return $percentile;
-# }
+
 class Range(object):
     def __init__(self, start, end):
         self.start = start
@@ -55,6 +40,16 @@ def extant_file(x):
     return x
 
 
+def prog_in_path_check(prog_to_check):
+    if shutil.which(prog_to_check):
+        print(prog_to_check + ' is in the path :-)')
+    else:
+        sys.exit('\nERROR: ' + prog_to_check +
+                 ' cannot be found in the path. \nSYS.EXIT: Please check your environment and ensure ' + prog_to_check +
+                 ' is installed and available before trying again.\n\n')
+
+
+
 def process_gff(gff_file, gff_feat_type, gff_extra):
     annotation = gffpd.read_gff3(gff_file)
     annotation = annotation.filter_feature_of_type(gff_feat_type)
@@ -71,12 +66,16 @@ def process_gff(gff_file, gff_feat_type, gff_extra):
         feat_length=(attr_to_columns.end - attr_to_columns.start + 1)).dropna(axis=1,
                                                                               how='all').drop(columns=['attributes'])
 
+    data_top = attr_to_columns.head()
+    print(data_top)
+
     # remove RFC 3986 % encoding from product (gff3 attribute)
     # attr_to_columns = attr_to_columns.assign(product_nopc=attr_to_columns['product'].apply(ul.parse.unquote)).drop(
     #    columns=['product']).rename(columns={'product_nopc': 'product'})
 
-    attr_to_columns['product'] = attr_to_columns['product'].apply(ul.parse.unquote)
-
+    # attr_to_columns['product'] = attr_to_columns['product'].apply(ul.parse.unquote)
+    attr_to_columns['product'] = attr_to_columns['product'].fillna('').astype(str).apply(
+        ul.parse.unquote)  # added fix for None datatype
     ## fix to skip requested extra gff annotation field if not present in GFF
     drop_gff_extra = []
     for field in gff_extra:
@@ -101,6 +100,11 @@ def process_gff(gff_file, gff_feat_type, gff_extra):
                                            'end',
                                            'feat_length',
                                            'product'] + gff_extra]  # add extra fields from gff
+
+    data_top = gff_columns_addback.head()
+    print(data_top)
+    data_top2 = attr_to_columns.head()
+    print(data_top2)
 
     return gff_columns_addback, attr_to_columns
     # end process_gff()
@@ -150,6 +154,24 @@ def process_sam(sam_file):
             f2.write('\n')
     f2.close()
     # end process_sam()
+
+
+def seqID_consistancy_check(mygffcolumns, my_sam):
+    af = pysam.AlignmentFile(my_sam)
+    sam_seq_ID_list = [name['SN'] for name in af.header['SQ']]
+    gff_seq_ID_list = mygffcolumns.seq_id.unique().tolist()
+    sam_seq_ID_list.sort()
+    gff_seq_ID_list.sort()
+    if sam_seq_ID_list == gff_seq_ID_list:
+        print('GFF & mapping reference sequence IDs match')
+    else:
+        sys.exit(
+            '\nERROR: GFF & mapping reference sequence IDs are inconsistent. \nSYS.EXIT: Please check and update the sequence IDs in your sequence and gff files so they match up before running again.\n\n')
+
+    print(type(sam_seq_ID_list))
+    print(type(gff_seq_ID_list))
+    print((sam_seq_ID_list))
+    print((gff_seq_ID_list))
 
 
 def coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, condition_label):
@@ -281,6 +303,7 @@ def coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, cond
     return pimms_result_table_full
     # end of coordinates_to_features()
 
+
 # main function
 # def main():
 
@@ -339,7 +362,8 @@ print("----------")
 print(ap.format_values())  # useful for logging where different settings came from
 
 # exit()
-
+# find required orog in path or exit with message
+prog_in_path_check('minimap2')
 
 # sort out extra requested gff annotation fields
 if parsed_args[0].gff_extra:
@@ -352,8 +376,8 @@ print("extra gff fields: " + str(gff_extra))
 gff_file = parsed_args[0].gff[0]
 gff_feat_type = ['CDS', 'tRNA', 'rRNA']
 # process the gff file to get required fields
-gff_columns_addback, attr_to_columns = process_gff(gff_file, gff_feat_type,
-                                                   gff_extra)  # trap multiple return values from function
+gff_columns_addback, attr_to_columns = process_gff(gff_file, gff_feat_type, gff_extra)
+# trap multiple return values from function
 # gff_file = '/Users/svzaw/Data/PIMMS_redo/PIMMS2_stuff/PIMMS_V1/S.uberis_0140J.gff3'
 # gff_file = 'UK15_assembly_fix03.gff'
 
@@ -373,7 +397,8 @@ condition_label = parsed_args[0].label[0]
 # sam_stem, sam_ext = os.path.splitext(os.path.basename(sam_file))
 # sam_stem = sam_stem + '_md' + str(min_depth_cutoff) + '_mm' + str(fraction_mismatch or '')
 
-
+# check all sequence names match up
+seqID_consistancy_check(gff_columns_addback, sam_file)
 # process pimms sam/bam  file and produce coordinate / bed files
 process_sam(sam_file)
 
@@ -409,6 +434,25 @@ writer.save()
 # Last unique insertion centile position(>= [-m] x coverage)	For each unique insertion position, the centile position of that locus is determined. The last (greatest centile) position is returned.
 # Normalised Reads Mapped (NRM score)	(total number of reads mapped per gene / length of gene in KB) / (total mapped read count / 10 ^ 6)
 # Normalised Insertions Mapped (NIM score)	(total number of unique insertions mapped per gene/length of gene in KB)/(total mapped read count/10^6)
+
+# sub get_position_as_percentile_pos{
+# my $in = $_;
+# my $in_locus  = $locus_lookup{$_};
+# my $in_length = $length_lookup{$in_locus};
+# my $in_start = $start_lookup{$in_locus};
+# my $percentile =  sprintf("%.1f", ((($in-$in_start)+1) / ($in_length/100)));
+# return $percentile;
+# }
+#
+# sub get_position_as_percentile_neg{
+# my $in = $_;
+# my $in_locus  = $locus_lookup{$_};
+# my $in_length = $length_lookup{$in_locus};
+# my $in_stop = $stop_lookup{$in_locus};
+# my $percentile =  sprintf("%.1f", ((($in_stop-$in)+1) / ($in_length/100)));
+# return $percentile;
+# }
+
 
 #    if __name__ == '__main__':
 #       main()
