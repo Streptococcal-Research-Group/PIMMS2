@@ -55,36 +55,53 @@ def concat_fastq(flanking_fastq_list, label, fq_file_suffix):
     concat_fastq_result_filename = label + '_RX_concat' + fq_file_suffix
     print(concat_fastq_result_filename)
     print(" ".join(flanking_fastq_list))
-
+    c = 0
     with pysam.FastxFile(flanking_fastq_list[0]) as fin, gzip.open(concat_fastq_result_filename, mode='wt') as fout:
+        print('FQRESULT 1' + flanking_fastq_list[0] + '\n')
         for entry in fin:
             fout.write((str(entry) + '\n'))
+            c = c + 1
 
     flanking_fastq_list.pop(0)
+    print('count: ' + str(c))
     for result_fq in flanking_fastq_list:
-        print('FQRESULT' + result_fq + '\n')
+        print('FQRESULT +' + result_fq + '\n')
         with pysam.FastxFile(result_fq) as fin, gzip.open(concat_fastq_result_filename, mode='at') as fout:
             for entry in fin:
                 fout.write((str(entry) + '\n'))
-
+                c = c + 1
+    print('count: ' + str(c))
     return (concat_fastq_result_filename)
 
 
 def run_minimap2(flanking_fastq_concat_result, sam_output_result, genome_fasta):
     stream = os.popen('minimap2 --version')
     output = stream.read()
-    print(output)
+    print('calling minimap version: ' + output)
     # process = subprocess.Popen(['minimap2', '--version'],
     print(' '.join(['minimap2', '-x', 'sr', '-a', '-o', sam_output_result, genome_fasta, flanking_fastq_concat_result,
                     '--secondary=no', '--sam-hit-only']))
     process = subprocess.Popen(
-        ['minimap2', '-x', 'sr', '-a', '-o', sam_output_result, flanking_fastq_concat_result, '--secondary=no',
+        ['minimap2', '-x', 'sr', '-a',
+         '-o', sam_output_result,
+         genome_fasta,
+         flanking_fastq_concat_result,
+         '--secondary=no',
          '--sam-hit-only'],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
     print(stdout.decode('utf-8'))
     print(stderr.decode('utf-8'))
+
+
+def py_sam_to_bam(sam_output_result):
+    pysam.sort('-O' 'BAM', "-o", sam_output_result + '.bam', sam_output_result)
+    pysam.index(sam_output_result + '.bam')
+    if parsed_args[0].rmfiles:
+        deleteFileList([sam_output_result])
+
+
 
 
 pimms_mls = """
@@ -598,12 +615,14 @@ if not nano:  # nano == False
         print(str(len(a)))
         print(str(len(b)))
         print(str(len(c)))
-
-        with pysam.FastxFile(fwd_fqp_result) as fin, gzip.open(mrg_fqp_result_filename, mode='wt') as fout:
+        # pysam bug doesn't parse files gzipped in chuncks so gzipping removed here
+        # with pysam.FastxFile(fwd_fqp_result) as fin, gzip.open(mrg_fqp_result_filename, mode='wt') as fout:
+        with pysam.FastxFile(fwd_fqp_result) as fin, open(mrg_fqp_result_filename, mode='wt') as fout:
             for entry in fin:
                 fout.write((str(entry) + '\n'))
 
-        with pysam.FastxFile(rev_fqp_result) as fin, gzip.open(mrg_fqp_result_filename, mode='at') as fout:
+        # with pysam.FastxFile(rev_fqp_result) as fin, gzip.open(mrg_fqp_result_filename, mode='at') as fout:
+        with pysam.FastxFile(rev_fqp_result) as fin, open(mrg_fqp_result_filename, mode='at') as fout:
             for entry in fin:
                 if entry.name in c:
                     fout.write((str(entry) + '\n'))
@@ -639,9 +658,11 @@ elif nano:  # nano == True
 if parsed_args[0].nomap:
     print("Skipping mapping step...\n")
 else:
+    print(flanking_fastq_result_list)
     concat_result_fastq = concat_fastq(flanking_fastq_result_list, parsed_args[0].label[0], fq_result_suffix)
-    sam_output = os.path.basename(parsed_args[0].fasta[0]) + '_' + parsed_args[0].label[0] + sam_result_suffix
+    sam_output = os.path.splitext(parsed_args[0].fasta[0])[0] + '_' + parsed_args[0].label[0] + sam_result_suffix
     run_minimap2(concat_result_fastq, sam_output, parsed_args[0].fasta[0])
+    py_sam_to_bam(sam_output)
 
 # flanking_fastq_result_list
 
