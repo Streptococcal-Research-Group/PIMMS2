@@ -8,6 +8,7 @@ import pandasql as ps
 import pysam
 import urllib as ul
 import configargparse
+from pathlib import Path
 import shutil
 
 
@@ -113,18 +114,24 @@ def modify_sam_stem(sam_file):
 def process_sam(sam_file):
     sam_stem = modify_sam_stem(sam_file)
     samfile = pysam.AlignmentFile(sam_file)  # without , "rb" should auto detect sam or bams
+
     open(sam_stem + ".bed", 'w').close()
     f = open(sam_stem + ".bed", "a")
 
     STRAND = ["+", "-"]
     for read in samfile.fetch():
+        if read.is_unmapped:
+            continue
         STR = STRAND[int(read.is_reverse)]
         BED = [read.reference_name, read.pos, read.reference_end, ".", read.mapping_quality, STR,
                '# ' + read.query_name]
         f.write('\t'.join([str(i) for i in BED]))
         f.write('\n')
     f.close()
+    print('#BED')
+    samfile.close()
 
+    samfile = pysam.AlignmentFile(sam_file)
     open(sam_stem + "_insert_coords.txt", 'w').close()
     f2 = open(sam_stem + "_insert_coords.txt", "a")
     f2.write('\t'.join([str(i) for i in ['ref_name', 'coord', 'strand', 'read_name']]))
@@ -133,11 +140,15 @@ def process_sam(sam_file):
     for read in samfile.fetch():
         if read.is_unmapped:
             continue
+        # print(read.query_name + '.')
+        # continue
         NM_value = read.get_tag('NM')
         if fraction_mismatch:  # and NM_value > 0:
             if (read.query_alignment_length * fraction_mismatch[0]) > NM_value:
                 continue
         STR = STRAND[int(read.is_reverse)]  # coverts is_reverse boolean into + or - strings
+        # print(STR)
+        #continue
         if STR == '+':
             COORDS = [read.reference_name, (read.reference_start + 4), STR, '# ' + read.query_name]
             f2.write('\t'.join([str(i) for i in COORDS]))
@@ -147,6 +158,8 @@ def process_sam(sam_file):
             f2.write('\t'.join([str(i) for i in COORDS]))
             f2.write('\n')
     f2.close()
+    samfile.close()
+    print('#COORDS')
     # end process_sam()
 
 
@@ -160,7 +173,9 @@ def seqID_consistancy_check(mygffcolumns, my_sam):
         print('GFF & mapping reference sequence IDs match')
     else:
         sys.exit(
-            '\nERROR: GFF & mapping reference sequence IDs are inconsistent. \nSYS.EXIT: Please check and update the sequence IDs in your sequence and gff files so they match up before running again.\n\n')
+            '\nERROR: GFF & mapping reference sequence IDs are inconsistent. \n' +
+            'SYS.EXIT: Please check and update the sequence IDs in your sequence and gff files so they match up before running again.\ngff:\n' +
+            str(gff_seq_ID_list) + '\nsam/bam:\n' + str(sam_seq_ID_list) + '\n')
 
     print(type(sam_seq_ID_list))
     print(type(gff_seq_ID_list))
@@ -403,8 +418,8 @@ sam_stem = modify_sam_stem(sam_file)
 pimms_result_table_full = coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, condition_label)
 
 # write results as text/excel
-pimms_result_table_full.to_csv(sam_stem + "countinfo_tab.txt", index=False, sep='\t')
-pimms_result_table_full.to_csv(sam_stem + "countinfo.csv", index=False, sep=',')
+pimms_result_table_full.to_csv(sam_stem + "_countinfo_tab.txt", index=False, sep='\t')
+pimms_result_table_full.to_csv(sam_stem + "_countinfo.csv", index=False, sep=',')
 writer = pd.ExcelWriter(sam_stem + '_countinfo.xlsx', engine='xlsxwriter')
 # Convert the dataframe to an XlsxWriter Excel object.
 pimms_result_table_full.to_excel(writer, sheet_name='PIMMS2_result', index=False)

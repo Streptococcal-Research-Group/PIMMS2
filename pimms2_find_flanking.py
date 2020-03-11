@@ -205,6 +205,7 @@ samcoords = modes.add_parser("sam_extract", help="Mode: extract insertion site c
 otherstuff = modes.add_parser("other_stuff", help='Mode: do other good PIMMS related stuff')
 # Add the arguments to the parser
 
+# to fix: nargs='?' deal with mistaken use of nargs=1 whic give a single element list
 findflank.add_argument("-c", "--config", required=False, is_config_file=True,  # dest='config_file',
                        # type=str, default='',
                        metavar='pimms2.config',
@@ -219,7 +220,7 @@ findflank.add_argument("--fasta", required=False, nargs=1, metavar='ref_genome.f
                        help="fast file for reference genome ")
 findflank.add_argument("--nomap", required=False, action='store_true', default=False,
                        help="do not run mapping step")
-findflank.add_argument("--mapper", required=False, nargs=1, type=str, default='minimap2', choices=['minimap2', 'bwa'],
+findflank.add_argument("--mapper", required=False, nargs='?', type=str, default='minimap2', choices=['minimap2', 'bwa'],
                        help="do not run mapping step")
 findflank.add_argument("--rmfiles", required=False, action='store_true', default=False,
                        help="remove intermediate files")
@@ -241,7 +242,8 @@ findflank.add_argument("--out_dir", required=False, nargs=1, metavar='DIR', defa
                        help="directory to contain fastq files results")
 # findflank.add_argument("--prefix", required=False, nargs=1, type=str, default="pimms2_condition",
 #                       help="prefix for output files")
-findflank.add_argument("--cpus", required=False, nargs=1, type=int, default=int(os.cpu_count() / 2),
+# findflank.add_argument("--cpus", required=False, nargs=1, type=int, default=int(os.cpu_count() / 2),
+findflank.add_argument("--cpus", required=False, nargs=1, type=int, default=int(6),
                        help="number of processors to use [(os.cpu_count() / 2)] ")
 findflank.add_argument("--max", required=True, nargs=1, type=int, default=60,
                        help="clip results to this length [illumina:60/nano:100")
@@ -279,7 +281,7 @@ print(ap.format_values())  # useful for logging where different settings came fr
 
 # construct config parser
 # p2config = configparser.ConfigParser()
-mapper = parsed_args[0].mapper[0]
+mapper = parsed_args[0].mapper
 label = parsed_args[0].label[0]
 if not parsed_args[0].nomap:
     prog_in_path_check(mapper)
