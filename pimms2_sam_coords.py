@@ -40,13 +40,7 @@ def extant_file(x):
     return x
 
 
-def prog_in_path_check(prog_to_check):
-    if shutil.which(prog_to_check):
-        print(prog_to_check + ' is in the path :-)')
-    else:
-        sys.exit('\nERROR: ' + prog_to_check +
-                 ' cannot be found in the path. \nSYS.EXIT: Please check your environment and ensure ' + prog_to_check +
-                 ' is installed and available before trying again.\n\n')
+
 
 
 
@@ -363,7 +357,7 @@ print(ap.format_values())  # useful for logging where different settings came fr
 
 # exit()
 # find required orog in path or exit with message
-prog_in_path_check('minimap2')
+# prog_in_path_check('minimap2')
 
 # sort out extra requested gff annotation fields
 if parsed_args[0].gff_extra:
