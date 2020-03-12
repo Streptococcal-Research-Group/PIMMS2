@@ -171,11 +171,16 @@ def seqID_consistancy_check(mygffcolumns, my_sam):
     gff_seq_ID_list.sort()
     if sam_seq_ID_list == gff_seq_ID_list:
         print('GFF & mapping reference sequence IDs match')
+    elif parsed_args[0].gff_force:
+        print('\nWARNING: GFF & mapping reference sequence IDs are inconsistent. \n' +
+              'sequence ID mismatch overridden by --gff_force\ngff:\n' +
+              str(gff_seq_ID_list) + '\nsam/bam:\n' + str(sam_seq_ID_list) + '\n')
     else:
         sys.exit(
             '\nERROR: GFF & mapping reference sequence IDs are inconsistent. \n' +
             'SYS.EXIT: Please check and update the sequence IDs in your sequence and gff files so they match up before running again.\ngff:\n' +
-            str(gff_seq_ID_list) + '\nsam/bam:\n' + str(sam_seq_ID_list) + '\n')
+            str(gff_seq_ID_list) + '\nsam/bam:\n' + str(sam_seq_ID_list) + '\n' +
+            'NOTE: If the sequence ID mismatch is benign e.g. an extra plasmid override by using --gff_force\n')
 
     print(type(sam_seq_ID_list))
     print(type(gff_seq_ID_list))
@@ -352,7 +357,8 @@ samcoords.add_argument("--gff", required=True, nargs=1, type=extant_file, defaul
                        help="GFF3 formatted file to use\n(note fasta sequence present in the file must be deleted before use)")
 samcoords.add_argument("--gff_extra", required=False, nargs=1, type=str, default='', metavar="'x,y,z'",
                        help="comma separated list of extra fields to include from the GFF3 annotation\ne.g. 'ID,translation,note' ")
-
+samcoords.add_argument("--gff_force", required=False, action='store_true', default=False,
+                       help="override GFF/BAM seq id discrepancies e.g. use when the gff has a plasmid not present in the reference sequence or vice-versa")
 # parsed_args = ap.parse_args()
 parsed_args = ap.parse_known_args()
 
