@@ -66,43 +66,12 @@ def concat_fastq_raw(flanking_fastq_list, label, fq_file_suffix, out_dir):
     concat_fastq_result_filename = os.path.join(out_dir, label + '_RX_concat' + fq_file_suffix + '.gz')
     print(concat_fastq_result_filename)
     print(" ".join(flanking_fastq_list))
-    # c = 0
-    # import shutil
-    # output = open("output.txt", "wb")
-    # shutil.copyfileobj(open("sample1.txt", "rb"), output)
-    # shutil.copyfileobj(open("sample2.txt", "rb"), output)
-    # output.close()
-    # f = gzip.open("concat_fastq_result_filename", "w")
+
     with gzip.open(concat_fastq_result_filename, "wt", compresslevel=6) as big_file:
         with fileinput.input(files=flanking_fastq_list) as inputs:
             for line in inputs:
                 big_file.write(line)
-    # for tempfq in flanking_fastq_list:
-    #     while True:
-    #         data = tempfq.read(65536)
-    #         if data:
-    #             f.write(data)
-    #         else:
-    #             break
 
-    # flanking_fastq_list_rm = flanking_fastq_list.copy()
-    # with pysam.FastxFile(flanking_fastq_list[0], persist=False) as fin, gzip.open(concat_fastq_result_filename, mode='wt') as fout:
-    #     print('FQRESULT 1' + flanking_fastq_list[0] + '\n')
-    #     for entry in fin:
-    #         fout.write((str(entry) + '\n'))
-    #         c = c + 1
-    #
-    #
-    # flanking_fastq_list.pop(0)
-    # # print('count: ' + str(c))
-    # for result_fq in flanking_fastq_list:
-    #     print('FQRESULT +' + result_fq + '\n')
-    #     with pysam.FastxFile(result_fq, persist=False) as fin, gzip.open(concat_fastq_result_filename, mode='at') as fout:
-    #         for entry in fin:
-    #             fout.write((str(entry) + '\n'))
-    #             c = c + 1
-    #
-    # print('count: ' + str(c))
 
     if parsed_args[0].rmfiles:
         print('Removing intermediate fastq flanking reads files')
@@ -114,40 +83,6 @@ def concat_fastq_raw(flanking_fastq_list, label, fq_file_suffix, out_dir):
 
 
 
-def concat_fastq(flanking_fastq_list, label, fq_file_suffix, out_dir):
-    concat_fastq_result_filename = os.path.join(out_dir, label + '_RX_concat' + fq_file_suffix + '.gz')
-    print(concat_fastq_result_filename)
-    print(" ".join(flanking_fastq_list))
-    c = 0
-    flanking_fastq_list_rm = flanking_fastq_list.copy()
-    with pysam.FastxFile(flanking_fastq_list[0], persist=False) as fin, gzip.open(concat_fastq_result_filename,
-                                                                                  mode='wt') as fout:
-        print('FQRESULT 1' + flanking_fastq_list[0] + '\n')
-        for entry in fin:
-            fout.write((str(entry) + '\n'))
-            c = c + 1
-
-
-    flanking_fastq_list.pop(0)
-    # print('count: ' + str(c))
-    for result_fq in flanking_fastq_list:
-        print('FQRESULT +' + result_fq + '\n')
-        with pysam.FastxFile(result_fq, persist=False) as fin, gzip.open(concat_fastq_result_filename,
-                                                                         mode='at') as fout:
-            for entry in fin:
-                fout.write((str(entry) + '\n'))
-                c = c + 1
-
-    print('count: ' + str(c))
-
-    if parsed_args[0].rmfiles:
-        print('Removing intermediate fastq flanking reads files')
-        print(flanking_fastq_list_rm)
-        deleteFileList(flanking_fastq_list_rm)
-
-
-
-    return (concat_fastq_result_filename)
 
 
 def run_minimap2(flanking_fastq_concat_result, sam_output_result, genome_fasta):
@@ -1007,3 +942,37 @@ else:
 # with open('reject_reads_list.txt', 'w') as filehandle:
 #     for listitem in reject_reads_list:
 #         filehandle.write('%s\n' % listitem)
+# def concat_fastq(flanking_fastq_list, label, fq_file_suffix, out_dir):
+#     concat_fastq_result_filename = os.path.join(out_dir, label + '_RX_concat' + fq_file_suffix + '.gz')
+#     print(concat_fastq_result_filename)
+#     print(" ".join(flanking_fastq_list))
+#     c = 0
+#     flanking_fastq_list_rm = flanking_fastq_list.copy()
+#     with pysam.FastxFile(flanking_fastq_list[0], persist=False) as fin, gzip.open(concat_fastq_result_filename,
+#                                                                                   mode='wt') as fout:
+#         print('FQRESULT 1' + flanking_fastq_list[0] + '\n')
+#         for entry in fin:
+#             fout.write((str(entry) + '\n'))
+#             c = c + 1
+#
+#
+#     flanking_fastq_list.pop(0)
+#     # print('count: ' + str(c))
+#     for result_fq in flanking_fastq_list:
+#         print('FQRESULT +' + result_fq + '\n')
+#         with pysam.FastxFile(result_fq, persist=False) as fin, gzip.open(concat_fastq_result_filename,
+#                                                                          mode='at') as fout:
+#             for entry in fin:
+#                 fout.write((str(entry) + '\n'))
+#                 c = c + 1
+#
+#     print('count: ' + str(c))
+#
+#     if parsed_args[0].rmfiles:
+#         print('Removing intermediate fastq flanking reads files')
+#         print(flanking_fastq_list_rm)
+#         deleteFileList(flanking_fastq_list_rm)
+#
+#
+#
+#     return (concat_fastq_result_filename)
