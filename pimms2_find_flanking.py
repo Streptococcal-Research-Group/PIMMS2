@@ -15,6 +15,7 @@ import gzip
 import pysam
 import subprocess
 import shutil
+import fileinput
 import logging
 import logging.handlers
 
@@ -61,13 +62,66 @@ def prog_in_path_check(prog_to_check):
                  ' is installed and available before trying again.\n\n')
 
 
+def concat_fastq_raw(flanking_fastq_list, label, fq_file_suffix, out_dir):
+    concat_fastq_result_filename = os.path.join(out_dir, label + '_RX_concat' + fq_file_suffix + '.gz')
+    print(concat_fastq_result_filename)
+    print(" ".join(flanking_fastq_list))
+    # c = 0
+    # import shutil
+    # output = open("output.txt", "wb")
+    # shutil.copyfileobj(open("sample1.txt", "rb"), output)
+    # shutil.copyfileobj(open("sample2.txt", "rb"), output)
+    # output.close()
+    # f = gzip.open("concat_fastq_result_filename", "w")
+    with gzip.open(concat_fastq_result_filename, "wt", compresslevel=6) as big_file:
+        with fileinput.input(files=flanking_fastq_list) as inputs:
+            for line in inputs:
+                big_file.write(line)
+    # for tempfq in flanking_fastq_list:
+    #     while True:
+    #         data = tempfq.read(65536)
+    #         if data:
+    #             f.write(data)
+    #         else:
+    #             break
+
+    # flanking_fastq_list_rm = flanking_fastq_list.copy()
+    # with pysam.FastxFile(flanking_fastq_list[0], persist=False) as fin, gzip.open(concat_fastq_result_filename, mode='wt') as fout:
+    #     print('FQRESULT 1' + flanking_fastq_list[0] + '\n')
+    #     for entry in fin:
+    #         fout.write((str(entry) + '\n'))
+    #         c = c + 1
+    #
+    #
+    # flanking_fastq_list.pop(0)
+    # # print('count: ' + str(c))
+    # for result_fq in flanking_fastq_list:
+    #     print('FQRESULT +' + result_fq + '\n')
+    #     with pysam.FastxFile(result_fq, persist=False) as fin, gzip.open(concat_fastq_result_filename, mode='at') as fout:
+    #         for entry in fin:
+    #             fout.write((str(entry) + '\n'))
+    #             c = c + 1
+    #
+    # print('count: ' + str(c))
+
+    if parsed_args[0].rmfiles:
+        print('Removing intermediate fastq flanking reads files')
+        # print(flanking_fastq_list)
+        deleteFileList(flanking_fastq_list)
+
+    return (concat_fastq_result_filename)
+
+
+
+
 def concat_fastq(flanking_fastq_list, label, fq_file_suffix, out_dir):
     concat_fastq_result_filename = os.path.join(out_dir, label + '_RX_concat' + fq_file_suffix + '.gz')
     print(concat_fastq_result_filename)
     print(" ".join(flanking_fastq_list))
     c = 0
     flanking_fastq_list_rm = flanking_fastq_list.copy()
-    with pysam.FastxFile(flanking_fastq_list[0]) as fin, gzip.open(concat_fastq_result_filename, mode='wt') as fout:
+    with pysam.FastxFile(flanking_fastq_list[0], persist=False) as fin, gzip.open(concat_fastq_result_filename,
+                                                                                  mode='wt') as fout:
         print('FQRESULT 1' + flanking_fastq_list[0] + '\n')
         for entry in fin:
             fout.write((str(entry) + '\n'))
@@ -78,7 +132,8 @@ def concat_fastq(flanking_fastq_list, label, fq_file_suffix, out_dir):
     # print('count: ' + str(c))
     for result_fq in flanking_fastq_list:
         print('FQRESULT +' + result_fq + '\n')
-        with pysam.FastxFile(result_fq) as fin, gzip.open(concat_fastq_result_filename, mode='at') as fout:
+        with pysam.FastxFile(result_fq, persist=False) as fin, gzip.open(concat_fastq_result_filename,
+                                                                         mode='at') as fout:
             for entry in fin:
                 fout.write((str(entry) + '\n'))
                 c = c + 1
@@ -133,17 +188,18 @@ def run_bwa(flanking_fastq_concat_result, sam_output_result, genome_fasta):
         print('Using existing BWA index...')
 
     print(' '.join(['bwa', 'mem', genome_fasta, flanking_fastq_concat_result, sam_output_result]))
-    with open(sam_output_result, 'w') as f:
-        process = subprocess.Popen(
-            ['bwa', 'mem',
-             # '-o', sam_output_result,
-             os.path.join(bwa_index_dir, genome_fasta),
-             flanking_fastq_concat_result],
-            stdout=f,
-            stderr=subprocess.PIPE)
-        stdout, stderr = process.communicate()
-        # print(stdout.decode('utf-8'))
-        print(stderr.decode('utf-8'))
+    # with open(sam_output_result, 'w') as f:
+    process = subprocess.Popen(
+        ['bwa', 'mem',
+         '-t', str(ncpus),
+         '-o', sam_output_result,
+         os.path.join(bwa_index_dir, genome_fasta),
+         flanking_fastq_concat_result],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE)
+    stdout, stderr = process.communicate()
+    print(stdout.decode('utf-8'))
+    print(stderr.decode('utf-8'))
 
 
 def py_sam_to_bam(sam_output_result):
@@ -416,7 +472,7 @@ def pimms_fastq(fq_filename, fqout_filename):
     reject_reads_list = []
     reject_reads_dict = dict()
     #   with pysam.FastxFile(fq_filename) as fin, gzip.open(fqout_filename + '.gz', mode='wb') as fout:
-    with pysam.FastxFile(fq_filename) as fin, open(fqout_filename, mode='wt') as fout:
+    with pysam.FastxFile(fq_filename, persist=False) as fin, open(fqout_filename, mode='wt') as fout:
         for entry in fin:
             count += 1
             # if decontam_tranposon == True:
@@ -470,51 +526,51 @@ def pimms_fastq(fq_filename, fqout_filename):
 
             if not bool(matchesq1 + matchesq2 + matchesq1rc + matchesq2rc):
                 # print(matchesq1 + matchesq2 + matchesq1rc + matchesq1rc)
-                reject_reads_dict.update({entry.name: 'nomatch'})
+                # reject_reads_dict.update({entry.name: 'nomatch'})
                 continue
             # skip fastq entry if multiple matches to same motif query seq
             if (len(matchesq1) > 1):
                 countqmulti += 1
-                reject_reads_list.append(entry.name)
-                reject_reads_dict.update({entry.name: 'multi'})
+                # reject_reads_list.append(entry.name)
+                # reject_reads_dict.update({entry.name: 'multi'})
                 continue
             if (len(matchesq2) > 1):
                 countqmulti += 1
-                reject_reads_list.append(entry.name)
-                reject_reads_dict.update({entry.name: 'multi'})
+                # reject_reads_list.append(entry.name)
+                # reject_reads_dict.update({entry.name: 'multi'})
                 continue
             if (len(matchesq1rc) > 1):
                 countqmulti += 1
-                reject_reads_list.append(entry.name)
-                reject_reads_dict.update({entry.name: 'multi'})
+                # reject_reads_list.append(entry.name)
+                # reject_reads_dict.update({entry.name: 'multi'})
                 continue
             if (len(matchesq2rc) > 1):
                 countqmulti += 1
-                reject_reads_list.append(entry.name)
-                reject_reads_dict.update({entry.name: 'multi'})
+                # reject_reads_list.append(entry.name)
+                # reject_reads_dict.update({entry.name: 'multi'})
                 continue
             # skip fastq entry if multiple matches to same motif query direct and reverse complement
 
             if ((len(matchesq1) == 1) and (len(matchesq1rc) == 1)):
                 countqqrc += 1
-                reject_reads_list.append(entry.name)
-                reject_reads_dict.update({entry.name: 'multicomp'})
+                # reject_reads_list.append(entry.name)
+                # reject_reads_dict.update({entry.name: 'multicomp'})
                 continue
             if ((len(matchesq2) == 1) and (len(matchesq2rc) == 1)):
                 countqqrc += 1
-                reject_reads_list.append(entry.name)
-                reject_reads_dict.update({entry.name: 'multicomp'})
+                # reject_reads_list.append(entry.name)
+                # reject_reads_dict.update({entry.name: 'multicomp'})
                 continue
             # or matches to two incompatible motifs
             if ((len(matchesq1) == 1) and (len(matchesq2rc) == 1)):
                 countqqrc += 1
-                reject_reads_list.append(entry.name)
-                reject_reads_dict.update({entry.name: 'multicomp'})
+                # reject_reads_list.append(entry.name)
+                # reject_reads_dict.update({entry.name: 'multicomp'})
                 continue
             if ((len(matchesq2) == 1) and (len(matchesq1rc) == 1)):
                 countqqrc += 1
-                reject_reads_list.append(entry.name)
-                reject_reads_dict.update({entry.name: 'multicomp'})
+                # reject_reads_list.append(entry.name)
+                # reject_reads_dict.update({entry.name: 'multicomp'})
                 continue
             # process motif match pairs to extract target sequences
             if ((len(matchesq1) == 1) and (len(matchesq2) == 1)):
@@ -523,8 +579,8 @@ def pimms_fastq(fq_filename, fqout_filename):
                 captured_qualstring = str(entry.quality)[matchesq1[0].end:matchesq2[0].start]
                 if (matchesq2[0].start <= matchesq1[0].end):
                     wrongq2q1 += 1
-                    reject_reads_list.append(entry.name)
-                    reject_reads_dict.update({entry.name: 'ooorder'})
+                    # reject_reads_list.append(entry.name)
+                    # reject_reads_dict.update({entry.name: 'ooorder'})
                     continue
 
                 if (len(captured_seqstring) >= min_length):
@@ -536,8 +592,8 @@ def pimms_fastq(fq_filename, fqout_filename):
                     continue
                 else:
                     hit_but_short_q1_q2 += 1
-                    reject_reads_list.append(entry.name)
-                    reject_reads_dict.update({entry.name: 'short'})
+                    # reject_reads_list.append(entry.name)
+                    # reject_reads_dict.update({entry.name: 'short'})
                 continue
             #            break
             if ((len(matchesq1rc) == 1) and (len(matchesq2rc) == 1)):
@@ -546,7 +602,7 @@ def pimms_fastq(fq_filename, fqout_filename):
                 captured_qualstring = str(entry.quality)[matchesq2rc[0].end:matchesq1rc[0].start]
                 if (matchesq1rc[0].start <= matchesq2rc[0].end):
                     wrongq1rcq2rc += 1
-                    reject_reads_dict.update({entry.name: 'ooorder'})
+                    # reject_reads_dict.update({entry.name: 'ooorder'})
                 if (len(captured_seqstring) >= min_length):
                     hit_q2rc_q1rc += 1
                     fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
@@ -556,8 +612,8 @@ def pimms_fastq(fq_filename, fqout_filename):
                     continue
                 else:
                     hit_but_short_q2rc_q1rc += 1
-                    reject_reads_list.append(entry.name)
-                    reject_reads_dict.update({entry.name: 'short'})
+                    # reject_reads_list.append(entry.name)
+                    # reject_reads_dict.update({entry.name: 'short'})
                 continue
             # process single motif matches to extract target sequences
             if (len(matchesq1) == 1):
@@ -575,8 +631,8 @@ def pimms_fastq(fq_filename, fqout_filename):
                     continue
                 else:
                     hit_but_short_q1_only += 1
-                    reject_reads_list.append(entry.name)
-                    reject_reads_dict.update({entry.name: 'short'})
+                    # reject_reads_list.append(entry.name)
+                    # reject_reads_dict.update({entry.name: 'short'})
                 continue
             if (len(matchesq2rc) == 1):
                 countq2rc += 1
@@ -593,8 +649,8 @@ def pimms_fastq(fq_filename, fqout_filename):
                     continue
                 else:
                     hit_but_short_q2rc_only += 1
-                    reject_reads_list.append(entry.name)
-                    reject_reads_dict.update({entry.name: 'short'})
+                    # reject_reads_list.append(entry.name)
+                    # reject_reads_dict.update({entry.name: 'short'})
                 continue
             if (len(matchesq1rc) == 1):
                 countq1rc += 1
@@ -611,8 +667,8 @@ def pimms_fastq(fq_filename, fqout_filename):
                     continue
                 else:
                     hit_but_short_q1rc_only += 1
-                    reject_reads_list.append(entry.name)
-                    reject_reads_dict.update({entry.name: 'short'})
+                    # reject_reads_list.append(entry.name)
+                    # reject_reads_dict.update({entry.name: 'short'})
                 continue
             if (len(matchesq2) == 1):
                 countq2 += 1
@@ -629,15 +685,15 @@ def pimms_fastq(fq_filename, fqout_filename):
                     continue
                 else:
                     hit_but_short_q2_only += 1
-                    reject_reads_list.append(entry.name)
-                    reject_reads_dict.update({entry.name: 'short'})
+                    # reject_reads_list.append(entry.name)
+                    # reject_reads_dict.update({entry.name: 'short'})
                 continue
 
     # reject_file = open(f'reject_list_{os.getppid()}_{multiprocessing.current_process().pid}.txt', 'w')
-    reject_class_file = open(f'{out_dir_logs}/reject_dict_{os.getppid()}_{multiprocessing.current_process().pid}.txt',
-                             'w')
-    for key, value in reject_reads_dict.items():
-        reject_class_file.write(f'{key}\t{value}\n')
+    # reject_class_file = open(f'{out_dir_logs}/reject_dict_{os.getppid()}_{multiprocessing.current_process().pid}.txt',
+    #                         'w')
+    # for key, value in reject_reads_dict.items():
+    #    reject_class_file.write(f'{key}\t{value}\n')
         #reject_class_file.write(f'%s\n' % listitem)
     # very cryptic logging needs reorganising and fixing to work with multiprocessing
     log_file = open(f'{out_dir_logs}/log_{os.getppid()}_{multiprocessing.current_process().pid}.txt', 'w')
@@ -686,7 +742,7 @@ def pimms_fastq(fq_filename, fqout_filename):
 
 # def survey_fastq(resultx_reads_list, resultx_reads_dict, fqout):
 def survey_fastq(resultx_reads_list, fqout):
-    with pysam.FastxFile(fqout) as fh:
+    with pysam.FastxFile(fqout, persist=False) as fh:
         for entry in fh:
             resultx_reads_list.append(entry.name)
             # resultx_reads_dict[entry.name] = len(str(entry.sequence))
@@ -759,12 +815,12 @@ if not nano:  # nano == False
         print(str(len(c)))
         # pysam bug doesn't parse files gzipped in chuncks so gzipping removed here
         # with pysam.FastxFile(fwd_fqp_result) as fin, gzip.open(mrg_fqp_result_filename, mode='wt') as fout:
-        with pysam.FastxFile(fwd_fqp_result) as fin, open(mrg_fqp_result_filename, mode='wt') as fout:
+        with pysam.FastxFile(fwd_fqp_result, persist=False) as fin, open(mrg_fqp_result_filename, mode='wt') as fout:
             for entry in fin:
                 fout.write((str(entry) + '\n'))
 
         # with pysam.FastxFile(rev_fqp_result) as fin, gzip.open(mrg_fqp_result_filename, mode='at') as fout:
-        with pysam.FastxFile(rev_fqp_result) as fin, open(mrg_fqp_result_filename, mode='at') as fout:
+        with pysam.FastxFile(rev_fqp_result, persist=False) as fin, open(mrg_fqp_result_filename, mode='at') as fout:
             for entry in fin:
                 if entry.name in c:
                     fout.write((str(entry) + '\n'))
@@ -802,7 +858,7 @@ if parsed_args[0].nomap:
 else:
     print(flanking_fastq_result_list)
     # concat_result_fastq = concat_fastq(flanking_fastq_result_list, parsed_args[0].label[0], fq_result_suffix, out_dir)
-    concat_result_fastq = concat_fastq(flanking_fastq_result_list, label, fq_result_suffix, out_dir)
+    concat_result_fastq = concat_fastq_raw(flanking_fastq_result_list, label, fq_result_suffix, out_dir)
     if mapper == 'minimap2':
         sam_output_mm = os.path.splitext(parsed_args[0].fasta[0])[0] + '_' + label + re.sub('.sam', '_mm2.sam',
                                                                                             sam_result_suffix)

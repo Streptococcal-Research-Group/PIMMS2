@@ -11,7 +11,7 @@
 
   # use Levenshtein distance of 1
   lev = False
-  sub = 1
+  sub = 0
   insert = 0
   del = 0
 
