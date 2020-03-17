@@ -92,6 +92,10 @@ def run_minimap2(flanking_fastq_concat_result, sam_output_result, genome_fasta):
     # process = subprocess.Popen(['minimap2', '--version'],
     print(' '.join(['minimap2', '-x', 'sr', '-a', '-o', sam_output_result, genome_fasta, flanking_fastq_concat_result,
                     '--secondary=no', '--sam-hit-only']))
+    if nano:
+        mm_mode = 'map-ont'
+    else:
+        mm_mode = 'sr'
     process = subprocess.Popen(
         ['minimap2', '-x', 'sr', '-a',
          '-o', sam_output_result,
@@ -207,6 +211,8 @@ findflank.add_argument("-c", "--config", required=False, is_config_file=True,  #
 #                       help="attempt removal of contaminating vector")
 findflank.add_argument("--nano", required=False, action='store_true', default=False,
                        help="override with settings more suitable for nanopore")
+findflank.add_argument("--cas9", required=False, action='store_true', default=False,
+                       help="override with motif matching method settings for nanopore cas9")
 findflank.add_argument("--fasta", required=False, nargs=1, metavar='ref_genome.fasta', type=extant_file,
                        help="fast file for reference genome ")
 findflank.add_argument("--nomap", required=False, action='store_true', default=False,
@@ -240,13 +246,12 @@ findflank.add_argument("--max", required=True, nargs=1, type=int, default=60,
                        help="clip results to this length [illumina:60/nano:100")
 findflank.add_argument("--min", required=True, nargs=1, type=int, default=25,
                        help="minimum read length [illumina:60/nano:100")
-findflank.add_argument("--motif1", required=False, nargs=1, type=str, default=['ggrep '],
+findflank.add_argument("--motif1", required=False, nargs=1, type=str, default=['TCAGAAAACTTTGCAACAGAACC'],
                        # revcomp: GGTTCTGTTGCAAAGTTTTCTGA
                        help="IS end reference motif1 [pGh9:TCAGAAAACTTTGCAACAGAACC]")
 findflank.add_argument("--motif2", required=False, nargs=1, type=str, default=['GGTTCTGTTGCAAAGTTTAAAAA'],
-                       # revcomp: TTTTTAAACTTTGCAACAGAACC**
+                       # revcomp: TTTTTAAACTTTGCAACAGAACC
                        help="IS end reference motif2 [pGh9:GGTTCTGTTGCAAAGTTTAAAAA]")
-
 findflank.add_argument("--label", required=False, nargs=1, metavar='condition_name', default=[''],
                        help="text tag to add to results file")
 
@@ -313,6 +318,7 @@ fwdrev_wc = parsed_args[0].fwdrev[0].strip("'\"").split(',')
 
 ncpus = int(parsed_args[0].cpus)
 nano = parsed_args[0].nano
+cas9 = parsed_args[0].cas9
 # experimental decontaminate transposon/vector sequence
 # not currently effective try another implementation when time allows?
 decontam_tranposon = False
@@ -325,11 +331,11 @@ fuzzy_levenshtein = parsed_args[0].lev
 
 # fq_result_suffix = "_pimmsout_trim100_nodecon.fastq"
 
-if nano:  # nano == True
+if nano | cas9:  # nano == True
     fuzzy_levenshtein = True
     l_dist = 2  # maximum Levenshtein Distance
-    min_length = 30
-    max_length = 150
+    min_length = 50
+    max_length = 200
     print('overriding with Nanopore appropriate settings: Levenshtein distance of ' + str(
         l_dist) + ' + sequence length min = ' + str(min_length) + ', max = ' + str(max_length))
 else:
@@ -340,18 +346,39 @@ else:
     min_length = parsed_args[0].min[0]
     max_length = parsed_args[0].max[0]
 
+if nano:
+    seqtype = '_nano'
+elif cas9:
+    seqtype = '_cas9'
+else:
+    seqtype = ''
+
 if fuzzy_levenshtein:
-    fq_result_suffix = ("_pimms2out_trim" + str(max_length) + "_lev" + str(l_dist) + ".fastq")
+    fq_result_suffix = (seqtype + "_pimms2out_trim" + str(max_length) + "_lev" + str(l_dist) + ".fastq")
 elif insrt > 0 | dels > 0:
-    fq_result_suffix = ("_pimms2out_trim" + str(max_length) + "_sub" + str(subs) + "_ins" + str(insrt) + "_del" + str(
+    fq_result_suffix = (
+                seqtype + "_pimms2out_trim" + str(max_length) + "_sub" + str(subs) + "_ins" + str(insrt) + "_del" + str(
         dels) + ".fastq")
 else:
-    fq_result_suffix = ("_pimms2out_trim" + str(max_length) + "_sub" + str(subs) + ".fastq")
+    fq_result_suffix = (seqtype + "_pimms2out_trim" + str(max_length) + "_sub" + str(subs) + ".fastq")
 
 sam_result_suffix = re.sub('.fastq', '.sam', fq_result_suffix)
 
 trans = str.maketrans('ATGCN', 'TACGN')  # complement DNA lookup
 
+# q1_contam = 'CTCTCCATCAAGCTATCGAATTCCTGCAGC'
+# q1_contam = 'ATCCACTAGTTCTAGAGCGG'
+q1_contam1 = 'TTCTCTCCATCAAGCTATCGAATTCCTGCAGCCC'
+q1_contam2 = 'GGGGGATCCACTAGTTCTA'
+
+q1rc_contam1 = 'TTCTCTCCATCAAGCTATCGAATTCCTGCAGCCC'.translate(trans)[::-1]
+q1rc_contam2 = 'GGGGGATCCACTAGTTCTA'.translate(trans)[::-1]
+
+q2_contam1 = 'CGGTATCGATAAGCTTGATAATTCG'
+q2_contam2 = 'CCAGTCACGACGTTGTAAA'
+
+q2rc_contam1 = 'CGGTATCGATAAGCTTGATAATTCG'.translate(trans)[::-1]
+q2rc_contam2 = 'CCAGTCACGACGTTGTAAA'.translate(trans)[::-1]
 # contam1 = 'GATGCTCTAGAGCATTCTCT'
 # contam2 = 'CATTCTCTCCATCAAGCTAT'
 # contam1rc = contam1.translate(trans)[::-1]  # reverse complement ([::-1] -> reverse)
@@ -675,6 +702,330 @@ def pimms_fastq(fq_filename, fqout_filename):
     # print("contains contaminating ISS sequence tags \t", is_contam)
 
 
+def pimms_fastq_cas9(fq_filename, fqout_filename):
+    print(fq_filename + "\n" + fqout_filename + "\n")
+    count = 0
+    countq1 = 0
+    countq2 = 0
+    countq1q2 = 0
+    countq1rc = 0
+    countq2rc = 0
+    countq1rcq2rc = 0
+    hit_but_short_q1_q2 = 0
+    hit_q1_q2 = 0
+    countq2rcq1rc = 0
+    hit_but_short_q2rc_q1rc = 0
+    hit_q2rc_q1rc = 0
+    wrongq2q1 = 0
+    wrongq1rcq2rc = 0
+    countqqrc = 0
+    countqmulti = 0
+    hit_but_short_q1_only = 0
+    hit_q1_only = 0
+    hit_but_short_q1rc_only = 0
+    hit_q1rc_only = 0
+
+    hit_but_short_q2_only = 0
+    hit_q2_only = 0
+    hit_but_short_q2rc_only = 0
+    hit_q2rc_only = 0
+    is_contam = 0
+    reject_reads_list = []
+    reject_reads_dict = dict()
+    #   with pysam.FastxFile(fq_filename) as fin, gzip.open(fqout_filename + '.gz', mode='wb') as fout:
+    with pysam.FastxFile(fq_filename, persist=False) as fin, open(fqout_filename, mode='wt') as fout:
+        for entry in fin:
+            count += 1
+
+            matchesq1 = find_near_matches(qry1, entry.sequence, max_l_dist=l_dist)
+            matchesq2 = find_near_matches(qry2, entry.sequence, max_l_dist=l_dist)
+            matchesq1rc = find_near_matches(qry1rc, entry.sequence, max_l_dist=l_dist)
+            matchesq2rc = find_near_matches(qry2rc, entry.sequence, max_l_dist=l_dist)
+            matchesq1_hits = len(matchesq1)
+            matchesq2_hits = len(matchesq2)
+            matchesq1rc_hits = len(matchesq1rc)
+            matchesq2rc_hits = len(matchesq2rc)
+            if not bool(matchesq1 + matchesq2 + matchesq1rc + matchesq2rc):
+                continue
+
+            # if not (matchesq1_hits + matchesq2_hits + matchesq1rc_hits + matchesq2rc_hits):
+            # print(matchesq1 + matchesq2 + matchesq1rc + matchesq1rc)
+            # reject_reads_dict.update({entry.name: 'nomatch'})
+
+            # skip fastq entry if multiple matches to same motif query direct and reverse complement
+
+            # if ((len(matchesq1) == 1) and (len(matchesq1rc) == 1)):
+            #     countqqrc += 1
+            #     # reject_reads_list.append(entry.name)
+            #     # reject_reads_dict.update({entry.name: 'multicomp'})
+            #     continue
+            # if ((len(matchesq2) == 1) and (len(matchesq2rc) == 1)):
+            #     countqqrc += 1
+            #     # reject_reads_list.append(entry.name)
+            #     # reject_reads_dict.update({entry.name: 'multicomp'})
+            #     continue
+            # # or matches to two incompatible motifs
+            # if ((len(matchesq1) == 1) and (len(matchesq2rc) == 1)):
+            #     countqqrc += 1
+            #     # reject_reads_list.append(entry.name)
+            #     # reject_reads_dict.update({entry.name: 'multicomp'})
+            #     continue
+            # if ((len(matchesq2) == 1) and (len(matchesq1rc) == 1)):
+            #     countqqrc += 1
+            #     # reject_reads_list.append(entry.name)
+            #     # reject_reads_dict.update({entry.name: 'multicomp'})
+            #     continue
+            # process motif match pairs to extract target sequences
+            # if ((len(matchesq1) == 1) and (len(matchesq2) == 1)):
+            #     countq1q2 += 1
+            #     captured_seqstring = str(entry.sequence)[matchesq1[0].end:matchesq2[0].start]
+            #     captured_qualstring = str(entry.quality)[matchesq1[0].end:matchesq2[0].start]
+            #     if (matchesq2[0].start <= matchesq1[0].end):
+            #         wrongq2q1 += 1
+            #         # reject_reads_list.append(entry.name)
+            #         # reject_reads_dict.update({entry.name: 'ooorder'})
+            #         continue
+            #
+            #     if (len(captured_seqstring) >= min_length):
+            #         hit_q1_q2 += 1
+            #         fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
+            #         fout.write(captured_seqstring[0:max_length] + '\n')
+            #         fout.write('+' + '\n')
+            #         fout.write(captured_qualstring[0:max_length] + '\n')
+            #         continue
+            #     else:
+            #         hit_but_short_q1_q2 += 1
+            #         # reject_reads_list.append(entry.name)
+            #         # reject_reads_dict.update({entry.name: 'short'})
+            #     continue
+            # #            break
+            # if ((len(matchesq1rc) == 1) and (len(matchesq2rc) == 1)):
+            #     countq2rcq1rc += 1
+            #     captured_seqstring = str(entry.sequence)[matchesq2rc[0].end:matchesq1rc[0].start]
+            #     captured_qualstring = str(entry.quality)[matchesq2rc[0].end:matchesq1rc[0].start]
+            #     if (matchesq1rc[0].start <= matchesq2rc[0].end):
+            #         wrongq1rcq2rc += 1
+            #         # reject_reads_dict.update({entry.name: 'ooorder'})
+            #     if (len(captured_seqstring) >= min_length):
+            #         hit_q2rc_q1rc += 1
+            #         fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
+            #         fout.write(captured_seqstring[0:max_length] + '\n')
+            #         fout.write('+' + '\n')
+            #         fout.write(captured_qualstring[0:max_length] + '\n')
+            #         continue
+            #     else:
+            #         hit_but_short_q2rc_q1rc += 1
+            #         # reject_reads_list.append(entry.name)
+            #         # reject_reads_dict.update({entry.name: 'short'})
+            #     continue
+            # # process single motif matches to extract target sequences
+            if (matchesq1_hits >= 1):
+                countq1 += 1
+                captured_seqstring = str(entry.sequence)[matchesq1[-1].end:]  # nothing after colon -> end of string
+                # -1 indicates last list member
+                captured_qualstring = str(entry.quality)[matchesq1[-1].end:]
+                if (len(captured_seqstring) >= min_length):
+                    # hit_q1_only += 1
+                    # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
+                    # fout.write(captured_seqstring[0:max_length] + '\n')
+                    # fout.write('+' + '\n')
+                    # fout.write(captured_qualstring[0:max_length] + '\n')
+                    contam_matches1q1 = find_near_matches(q1_contam1, captured_seqstring[0:50], max_l_dist=5)
+                    contam_matches2q1 = find_near_matches(q1_contam2, captured_seqstring[20:70], max_l_dist=3)
+                    if not bool(contam_matches1q1 + contam_matches2q1):
+                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n' +
+                        #            captured_seqstring[0:max_length] + '\n' +
+                        #            '+' + '\n' +
+                        #            captured_qualstring[0:max_length] + '\n')
+                        fout.write(''.join(['@', str(entry.name), ' ', str(entry.comment), '\n',
+                                            captured_seqstring[0:max_length], '\n',
+                                            '+', '\n',
+                                            captured_qualstring[0:max_length], '\n']))
+                        continue
+                    else:
+                        continue
+                else:
+                    hit_but_short_q1_only += 1
+                    # reject_reads_list.append(entry.name)
+                    # reject_reads_dict.update({entry.name: 'short'})
+                continue
+            if (matchesq2rc_hits >= 1):
+                countq2rc += 1
+                captured_seqstring = str(entry.sequence)[matchesq2rc[-1].end:]  # nothing after colon -> end of string
+                # -1 indicates last list member
+                captured_qualstring = str(entry.quality)[matchesq2rc[-1].end:]
+                if (len(captured_seqstring) >= min_length):
+                    # hit_q1_only += 1
+                    # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
+                    # fout.write(captured_seqstring[0:max_length] + '\n')
+                    # fout.write('+' + '\n')
+                    # fout.write(captured_qualstring[0:max_length] + '\n')
+                    contam_matches1q2rc = find_near_matches(q2rc_contam1, captured_seqstring[0:50], max_l_dist=4)
+                    contam_matches2q2rc = find_near_matches(q2rc_contam2, captured_seqstring[70:150], max_l_dist=3)
+                    contam_matches1q1 = find_near_matches(q1_contam1, captured_seqstring[0:50], max_l_dist=5)
+                    contam_matches2q1 = find_near_matches(q1_contam2, captured_seqstring[20:70], max_l_dist=3)
+                    if not bool(contam_matches1q2rc + contam_matches2q2rc + contam_matches1q1 + contam_matches2q1):
+                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n' +
+                        #            captured_seqstring[0:max_length].translate(trans)[::-1] + '\n' +
+                        #            '+' + '\n' +
+                        #            captured_qualstring[0:max_length][::-1] + '\n')
+                        fout.write(''.join(['@', str(entry.name), ' ', str(entry.comment), '\n',
+                                            captured_seqstring[0:max_length].translate(trans)[::-1], '\n',
+                                            '+', '\n',
+                                            captured_qualstring[0:max_length][::-1], '\n']))
+                        continue
+                    else:
+                        continue
+                else:
+                    hit_but_short_q1_only += 1
+                    # reject_reads_list.append(entry.name)
+                    # reject_reads_dict.update({entry.name: 'short'})
+                continue
+            if (matchesq2_hits >= 1):
+                countq1 += 1
+                captured_seqstring = str(entry.sequence)[0:matchesq2[0].start]  # nothing after colon -> end of string
+                # -1 indicates last list member
+                captured_qualstring = str(entry.quality)[0:matchesq2[0].start]
+                if (len(captured_seqstring) >= min_length):
+                    # hit_q1_only += 1
+                    # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
+                    # fout.write(captured_seqstring[0:max_length] + '\n')
+                    # fout.write('+' + '\n')
+                    # fout.write(captured_qualstring[0:max_length] + '\n')
+                    # contam_matches1q2rc = find_near_matches(q2rc_contam1, captured_seqstring[0:50], max_l_dist=4)
+                    # contam_matches2q2rc = find_near_matches(q2rc_contam2, captured_seqstring[70:150], max_l_dist=3)
+                    contam_matches1q2 = find_near_matches(q2_contam1, captured_seqstring[-50:], max_l_dist=5)
+                    contam_matches2q2 = find_near_matches(q2_contam2, captured_seqstring[-80:], max_l_dist=3)
+                    if not bool(contam_matches1q2 + contam_matches2q2):
+                        # + contam_matches1q1 + contam_matches2q1):
+                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n' +
+                        #            captured_seqstring[0:max_length].translate(trans)[::-1] + '\n' +
+                        #            '+' + '\n' +
+                        #            captured_qualstring[0:max_length][::-1] + '\n')
+                        fout.write(''.join(['@', str(entry.name), ' ', str(entry.comment), '\n',
+                                            captured_seqstring[-max_length:].translate(trans)[::-1], '\n',
+                                            '+', '\n',
+                                            captured_qualstring[-max_length:][::-1], '\n']))
+                        continue
+                    else:
+                        continue
+                else:
+                    hit_but_short_q1_only += 1
+                    # reject_reads_list.append(entry.name)
+                    # reject_reads_dict.update({entry.name: 'short'})
+                continue
+            if (matchesq1rc_hits >= 1):
+                countq1rc += 1
+                captured_seqstring = str(entry.sequence)[matchesq1rc[-1].end:]  # nothing after colon -> end of string
+                # -1 indicates last list member
+                captured_qualstring = str(entry.quality)[matchesq1rc[-1].end:]
+                if (len(captured_seqstring) >= min_length):
+                    # hit_q1_only += 1
+                    # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
+                    # fout.write(captured_seqstring[0:max_length] + '\n')
+                    # fout.write('+' + '\n')
+                    # fout.write(captured_qualstring[0:max_length] + '\n')
+                    contam_matches1q1rc = find_near_matches(q1rc_contam1, captured_seqstring[0:50], max_l_dist=4)
+                    contam_matches2q1rc = find_near_matches(q1rc_contam2, captured_seqstring[70:150], max_l_dist=3)
+                    # contam_matches1q1 = find_near_matches(q1_contam1, captured_seqstring[0:50], max_l_dist=5)
+                    # contam_matches2q1 = find_near_matches(q1_contam2, captured_seqstring[20:70], max_l_dist=3)
+                    if not bool(contam_matches1q1rc + contam_matches2q1rc):  # + contam_matches1q1 + contam_matches2q1):
+                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n' +
+                        #            captured_seqstring[0:max_length].translate(trans)[::-1] + '\n' +
+                        #            '+' + '\n' +
+                        #            captured_qualstring[0:max_length][::-1] + '\n')
+                        fout.write(''.join(['@', str(entry.name), ' ', str(entry.comment), '\n',
+                                            captured_seqstring[0:max_length].translate(trans)[::-1], '\n',
+                                            '+', '\n',
+                                            captured_qualstring[0:max_length][::-1], '\n']))
+                        continue
+                    else:
+                        continue
+                else:
+                    hit_but_short_q1_only += 1
+                    # reject_reads_list.append(entry.name)
+                    # reject_reads_dict.update({entry.name: 'short'})
+                continue
+            # # if (len(matchesq2rc) == 1):
+            #     countq2rc += 1
+            #     captured_seqstring = str(entry.sequence)[
+            #                          matchesq2rc[0].end:]  # nothing after colon indicates end of string
+            #     captured_qualstring = str(entry.quality)[
+            #                           matchesq2rc[0].end:]
+            #     if (len(captured_seqstring) >= min_length):
+            #         hit_q2rc_only += 1
+            #         fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
+            #         fout.write(captured_seqstring[0:max_length] + '\n')
+            #         fout.write('+' + '\n')
+            #         fout.write(captured_qualstring[0:max_length] + '\n')
+            #         continue
+            #     else:
+            #         hit_but_short_q2rc_only += 1
+            #         # reject_reads_list.append(entry.name)
+            #         # reject_reads_dict.update({entry.name: 'short'})
+            #     continue
+            # if (len(matchesq1rc) == 1):
+            #     countq1rc += 1
+            #     captured_seqstring = str(entry.sequence)[
+            #                          0:matchesq1rc[0].start]  # nothing after colon indicates end of string
+            #     captured_qualstring = str(entry.quality)[
+            #                           0:matchesq1rc[0].start]
+            #     if (len(captured_seqstring) >= min_length):
+            #         hit_q1rc_only += 1
+            #         fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
+            #         fout.write(captured_seqstring[-max_length:].translate(trans)[::-1] + '\n')
+            #         fout.write('+' + '\n')
+            #         fout.write(captured_qualstring[-max_length:][::-1] + '\n')
+            #         continue
+            #     else:
+            #         hit_but_short_q1rc_only += 1
+            #         # reject_reads_list.append(entry.name)
+            #         # reject_reads_dict.update({entry.name: 'short'})
+            #     continue
+            # if (matchesq2_hits >= 1):
+            #     countq2 += 1
+            #     captured_seqstring = str(entry.sequence)[
+            #                          0:matchesq2[0].start]  # nothing after colon indicates end of string
+            #     captured_qualstring = str(entry.quality)[
+            #                           0:matchesq2[0].start]
+            #     if (len(captured_seqstring) >= min_length):
+            #         hit_q2_only += 1
+            #         fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
+            #         fout.write(captured_seqstring[-max_length:].translate(trans)[::-1] + '\n')
+            #         fout.write('+' + '\n')
+            #         fout.write(captured_qualstring[-max_length:][::-1] + '\n')
+            #         continue
+            #     else:
+            #         hit_but_short_q2_only += 1
+            #         # reject_reads_list.append(entry.name)
+            #         # reject_reads_dict.update({entry.name: 'short'})
+            #     continue
+
+    # reject_file = open(f'reject_list_{os.getppid()}_{multiprocessing.current_process().pid}.txt', 'w')
+
+    log_file = open(f'{out_dir_logs}/log_{os.getppid()}_{multiprocessing.current_process().pid}.txt', 'w')
+
+    # err_file = open(f'log_{os.getppid()}_{multiprocessing.current_process().pid}.err', 'w')
+    try:
+        log_file.write(f'{fq_filename}: find flanking sequences report\n')
+        log_file.write(f'read count:\t{count}\n')
+        log_file.write(
+            f'read match to both motifs (fwd|revcomp):\t{hit_q1_q2 + hit_q2rc_q1rc + hit_but_short_q1_q2 + hit_but_short_q2rc_q1rc}\n')
+        log_file.write(f'read match to both motifs (fwd|revcomp) >= {min_length}:\t{hit_q1_q2 + hit_q2rc_q1rc}\n')
+        log_file.write(f'read match to multiple copies of a motif:\t{countqmulti}\n')
+        log_file.write(f'read match to mismatched motifs:\t{countqqrc}\n')
+        log_file.write(
+            f'read match to single motif  >= {min_length}:\t{hit_q1_only + hit_q2_only + hit_q1rc_only + hit_q2rc_only}\n')
+    except Exception as e:
+        # Write problems to the error file
+        log_file.write(f'ERROR: problem with motif matching to {fq_filename}!\n')
+    finally:
+        # Close the files!
+        log_file.close()
+        # err_file.close()
+
+
+
 # def survey_fastq(resultx_reads_list, resultx_reads_dict, fqout):
 def survey_fastq(resultx_reads_list, fqout):
     with pysam.FastxFile(fqout, persist=False) as fh:
@@ -684,8 +1035,64 @@ def survey_fastq(resultx_reads_list, fqout):
 
 
 flanking_fastq_result_list = []
+if nano:  # nano == True
+    print(datetime.datetime.now())
+    pn = multiprocessing.Pool(ncpus)
+    pi = multiprocessing.Pool(ncpus)
+    for fq in glob.glob(fastq_dir + "*q.gz"):
+        pi.apply_async(pimms_fastq,
+                       args=(fq,
+                             os.path.join(out_dir, Path(Path(fq).stem).stem + fq_result_suffix  # rmove double suffix
+                                          # os.path.join(out_dir,
+                                          #             os.path.splitext(os.path.splitext(os.path.basename(fq))[0])[
+                                          #                 0] + fq_result_suffix
+                                          )  # output illumina fastq output filepath
+                             # (os.path.splitext(os.path.splitext(fq)[0])[0] + fq_result_suffix)))
+                             )
+                       )
 
-if not nano:  # nano == False
+    pi.close()
+    pi.join()
+    # for fq in glob.glob(fastq_dir + "*q.gz") + glob.glob(fastq_dir + "*.fastq"):
+    #     pn.apply_async(pimms_fastq,
+    #                    args=(fq,  # input nanopore fastq filepath
+    #                          os.path.join(out_dir,
+    #                                       os.path.splitext(os.path.splitext(os.path.basename(fq))[0])[
+    #                                           0] + fq_result_suffix
+    #                                       )  # output nanopore fastq output filepath
+    #                          )
+    #                    #   (os.path.splitext(os.path.splitext(fq)[0])[0] + fq_result_suffix))
+    #                    )
+    #
+    # pn.close()
+    # pn.join()
+    print("nanopore PIMMS filtering completed...\n")
+    print(datetime.datetime.now())
+
+elif cas9:
+    print("CAS9 stuff???????????")
+    print(datetime.datetime.now())
+    pn = multiprocessing.Pool(ncpus)
+    pi = multiprocessing.Pool(ncpus)
+    for fq in glob.glob(fastq_dir + "*q.gz"):
+        pi.apply_async(pimms_fastq_cas9,
+                       args=(fq,
+                             os.path.join(out_dir, Path(Path(fq).stem).stem + fq_result_suffix  # rmove double suffix
+                                          # os.path.join(out_dir,
+                                          #             os.path.splitext(os.path.splitext(os.path.basename(fq))[0])[
+                                          #                 0] + fq_result_suffix
+                                          )  # output illumina fastq output filepath
+                             # (os.path.splitext(os.path.splitext(fq)[0])[0] + fq_result_suffix)))
+                             )
+                       )
+
+    pi.close()
+    pi.join()
+
+    print("CAS9 stuff completed...\n")
+    print(datetime.datetime.now())
+
+else:  # nano == False
     print(datetime.datetime.now())
     pi = multiprocessing.Pool(ncpus)
     for fq in glob.glob(fastq_dir + "*.fastq"):
@@ -768,25 +1175,7 @@ if not nano:  # nano == False
 
     print("illumina merge of fwd/reverse data  completed...\n")
 
-
-elif nano:  # nano == True
-    print(datetime.datetime.now())
-    pn = multiprocessing.Pool(ncpus)
-    for fq in glob.glob(fastq_dir + "*q.gz") + glob.glob(fastq_dir + "*.fastq"):
-        pn.apply_async(pimms_fastq,
-                       args=(fq,  # input nanopore fastq filepath
-                             os.path.join(out_dir,
-                                          os.path.splitext(os.path.splitext(os.path.basename(fq))[0])[
-                                              0] + fq_result_suffix
-                                          )  # output nanopore fastq output filepath
-                             )
-                       #   (os.path.splitext(os.path.splitext(fq)[0])[0] + fq_result_suffix))
-                       )
-
-    pn.close()
-    pn.join()
-    print("nanopore PIMMS filtering completed...\n")
-    print(datetime.datetime.now())
+## do mapping stuff
 
 if parsed_args[0].nomap:
     print("Skipping mapping step...\n")
@@ -976,3 +1365,16 @@ else:
 #
 #
 #     return (concat_fastq_result_filename)
+# for fq in glob.glob(fastq_dir + "*q.gz") + glob.glob(fastq_dir + "*.fastq"):
+#     pn.apply_async(pimms_fastq,
+#                    args=(fq,  # input nanopore fastq filepath
+#                          os.path.join(out_dir,
+#                                       os.path.splitext(os.path.splitext(os.path.basename(fq))[0])[
+#                                           0] + fq_result_suffix
+#                                       )  # output nanopore fastq output filepath
+#                          )
+#                    #   (os.path.splitext(os.path.splitext(fq)[0])[0] + fq_result_suffix))
+#                    )
+#
+# pn.close()
+# pn.join()
