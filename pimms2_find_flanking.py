@@ -92,15 +92,16 @@ def run_minimap2(flanking_fastq_concat_result, sam_output_result, genome_fasta):
     # process = subprocess.Popen(['minimap2', '--version'],
     print(' '.join(['minimap2', '-x', 'sr', '-a', '-o', sam_output_result, genome_fasta, flanking_fastq_concat_result,
                     '--secondary=no', '--sam-hit-only']))
-    if nano:
+    if nano | cas9:
         mm_mode = 'map-ont'
     else:
         mm_mode = 'sr'
     process = subprocess.Popen(
-        ['minimap2', '-x', 'sr', '-a',
-         '-o', sam_output_result,
+        ['minimap2', '-x', mm_mode,
+         '-a', '-o', sam_output_result,
          genome_fasta,
-         flanking_fastq_concat_result],
+         flanking_fastq_concat_result,
+         '--secondary=no', '--sam-hit-only'],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE)
     stdout, stderr = process.communicate()
@@ -368,10 +369,10 @@ trans = str.maketrans('ATGCN', 'TACGN')  # complement DNA lookup
 
 # q1_contam = 'CTCTCCATCAAGCTATCGAATTCCTGCAGC'
 # q1_contam = 'ATCCACTAGTTCTAGAGCGG'
-q1_contam1 = 'TTCTCTCCATCAAGCTATCGAATTCCTGCAGCCC'
+q1_contam1 = 'TTCTCTCCATCAAGCTATCGAATTCCTGCAGCC'
 q1_contam2 = 'GGGGGATCCACTAGTTCTA'
 
-q1rc_contam1 = 'TTCTCTCCATCAAGCTATCGAATTCCTGCAGCCC'.translate(trans)[::-1]
+q1rc_contam1 = 'TTCTCTCCATCAAGCTATCGAATTCCTGCAGCC'.translate(trans)[::-1]
 q1rc_contam2 = 'GGGGGATCCACTAGTTCTA'.translate(trans)[::-1]
 
 q2_contam1 = 'CGGTATCGATAAGCTTGATAATTCG'
@@ -916,17 +917,17 @@ def pimms_fastq_cas9(fq_filename, fqout_filename):
                 continue
             if (matchesq1rc_hits >= 1):
                 countq1rc += 1
-                captured_seqstring = str(entry.sequence)[matchesq1rc[-1].end:]  # nothing after colon -> end of string
+                captured_seqstring = str(entry.sequence)[0:matchesq1rc[0].start]  # nothing after colon -> end of string
                 # -1 indicates last list member
-                captured_qualstring = str(entry.quality)[matchesq1rc[-1].end:]
+                captured_qualstring = str(entry.quality)[0:matchesq1rc[0].start]
                 if (len(captured_seqstring) >= min_length):
                     # hit_q1_only += 1
                     # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
                     # fout.write(captured_seqstring[0:max_length] + '\n')
                     # fout.write('+' + '\n')
                     # fout.write(captured_qualstring[0:max_length] + '\n')
-                    contam_matches1q1rc = find_near_matches(q1rc_contam1, captured_seqstring[0:50], max_l_dist=4)
-                    contam_matches2q1rc = find_near_matches(q1rc_contam2, captured_seqstring[70:150], max_l_dist=3)
+                    contam_matches1q1rc = find_near_matches(q1rc_contam1, captured_seqstring[-50:], max_l_dist=4)
+                    contam_matches2q1rc = find_near_matches(q1rc_contam2, captured_seqstring[-150:-70], max_l_dist=3)
                     # contam_matches1q1 = find_near_matches(q1_contam1, captured_seqstring[0:50], max_l_dist=5)
                     # contam_matches2q1 = find_near_matches(q1_contam2, captured_seqstring[20:70], max_l_dist=3)
                     if not bool(contam_matches1q1rc + contam_matches2q1rc):  # + contam_matches1q1 + contam_matches2q1):
@@ -935,9 +936,9 @@ def pimms_fastq_cas9(fq_filename, fqout_filename):
                         #            '+' + '\n' +
                         #            captured_qualstring[0:max_length][::-1] + '\n')
                         fout.write(''.join(['@', str(entry.name), ' ', str(entry.comment), '\n',
-                                            captured_seqstring[0:max_length].translate(trans)[::-1], '\n',
+                                            captured_seqstring[-max_length:], '\n',  # .translate(trans)[::-1]
                                             '+', '\n',
-                                            captured_qualstring[0:max_length][::-1], '\n']))
+                                            captured_qualstring[-max_length:], '\n']))  # [::-1]
                         continue
                     else:
                         continue
@@ -1040,16 +1041,18 @@ if nano:  # nano == True
     pn = multiprocessing.Pool(ncpus)
     pi = multiprocessing.Pool(ncpus)
     for fq in glob.glob(fastq_dir + "*q.gz"):
+        fq_processed = os.path.join(out_dir, Path(Path(fq).stem).stem + fq_result_suffix)
+        flanking_fastq_result_list = flanking_fastq_result_list + [fq_processed]
         pi.apply_async(pimms_fastq,
-                       args=(fq,
-                             os.path.join(out_dir, Path(Path(fq).stem).stem + fq_result_suffix  # rmove double suffix
-                                          # os.path.join(out_dir,
-                                          #             os.path.splitext(os.path.splitext(os.path.basename(fq))[0])[
-                                          #                 0] + fq_result_suffix
-                                          )  # output illumina fastq output filepath
-                             # (os.path.splitext(os.path.splitext(fq)[0])[0] + fq_result_suffix)))
-                             )
+                       args=(fq, fq_processed)
+                       # os.path.join(out_dir, Path(Path(fq).stem).stem + fq_result_suffix)  # rmove double suffix
+                       # os.path.join(out_dir,
+                       #             os.path.splitext(os.path.splitext(os.path.basename(fq))[0])[
+                       #                 0] + fq_result_suffix
+                       #)  # output illumina fastq output filepath
+                       # (os.path.splitext(os.path.splitext(fq)[0])[0] + fq_result_suffix)))
                        )
+        # )
 
     pi.close()
     pi.join()
@@ -1075,17 +1078,18 @@ elif cas9:
     pn = multiprocessing.Pool(ncpus)
     pi = multiprocessing.Pool(ncpus)
     for fq in glob.glob(fastq_dir + "*q.gz"):
+        fq_processed = os.path.join(out_dir, Path(Path(fq).stem).stem + fq_result_suffix)
+        flanking_fastq_result_list = flanking_fastq_result_list + [fq_processed]
         pi.apply_async(pimms_fastq_cas9,
-                       args=(fq,
-                             os.path.join(out_dir, Path(Path(fq).stem).stem + fq_result_suffix  # rmove double suffix
+                       args=(fq, fq_processed)
+                       #os.path.join(out_dir, Path(Path(fq).stem).stem + fq_result_suffix)  # rmove double suffix
                                           # os.path.join(out_dir,
                                           #             os.path.splitext(os.path.splitext(os.path.basename(fq))[0])[
                                           #                 0] + fq_result_suffix
-                                          )  # output illumina fastq output filepath
+                       #)  # output illumina fastq output filepath
                              # (os.path.splitext(os.path.splitext(fq)[0])[0] + fq_result_suffix)))
                              )
-                       )
-
+        # )
     pi.close()
     pi.join()
 
@@ -1110,14 +1114,10 @@ else:  # nano == False
 
     pi = multiprocessing.Pool(ncpus)
     for fq in glob.glob(fastq_dir + "*q.gz"):
+        fq_processed = os.path.join(out_dir, Path(Path(fq).stem).stem + fq_result_suffix)
         pi.apply_async(pimms_fastq,
-                       args=(fq,
-                             os.path.join(out_dir, Path(Path(fq).stem).stem + fq_result_suffix  # rmove double suffix
-                                          # os.path.join(out_dir,
-                                          #             os.path.splitext(os.path.splitext(os.path.basename(fq))[0])[
-                                          #                 0] + fq_result_suffix
-                                          )  # output illumina fastq output filepath
-                             # (os.path.splitext(os.path.splitext(fq)[0])[0] + fq_result_suffix)))
+                       args=(fq, fq_processed
+                             #os.path.join(out_dir, Path(Path(fq).stem).stem + fq_result_suffix)  # rmove double suffix
                              )
                        )
 
@@ -1175,14 +1175,16 @@ else:  # nano == False
 
     print("illumina merge of fwd/reverse data  completed...\n")
 
+# tidy up
+print(flanking_fastq_result_list)
+# concat_result_fastq = concat_fastq(flanking_fastq_result_list, parsed_args[0].label[0], fq_result_suffix, out_dir)
+concat_result_fastq = concat_fastq_raw(flanking_fastq_result_list, label, fq_result_suffix, out_dir)
+
 ## do mapping stuff
 
 if parsed_args[0].nomap:
     print("Skipping mapping step...\n")
 else:
-    print(flanking_fastq_result_list)
-    # concat_result_fastq = concat_fastq(flanking_fastq_result_list, parsed_args[0].label[0], fq_result_suffix, out_dir)
-    concat_result_fastq = concat_fastq_raw(flanking_fastq_result_list, label, fq_result_suffix, out_dir)
     if mapper == 'minimap2':
         sam_output_mm = os.path.splitext(parsed_args[0].fasta[0])[0] + '_' + label + re.sub('.sam', '_mm2.sam',
                                                                                             sam_result_suffix)
