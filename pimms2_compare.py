@@ -18,7 +18,7 @@ ap = configargparse.ArgumentParser(  # description='PIMMS2 sam/bam processing',
     epilog="\n\n*** N.B. This is a development version ***\n \n ",
     description='''description here'''
 )
-ap.add_argument('--version', action='version', version='%(prog)s 2.0.2 demo')
+ap.add_argument('--version', action='version', version='%(prog)s 2.0.2  demo')
 modes = ap.add_subparsers(parser_class=configargparse.ArgParser)
 
 # modes.required = False

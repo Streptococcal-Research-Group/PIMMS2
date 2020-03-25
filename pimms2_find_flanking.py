@@ -332,6 +332,7 @@ fuzzy_levenshtein = parsed_args[0].lev
 
 # fq_result_suffix = "_pimmsout_trim100_nodecon.fastq"
 
+# set up some variables:
 if nano | cas9:  # nano == True
     fuzzy_levenshtein = True
     l_dist = 2  # maximum Levenshtein Distance
@@ -347,6 +348,7 @@ else:
     min_length = parsed_args[0].min[0]
     max_length = parsed_args[0].max[0]
 
+# set up some names
 if nano:
     seqtype = '_nano'
 elif cas9:
@@ -369,6 +371,8 @@ trans = str.maketrans('ATGCN', 'TACGN')  # complement DNA lookup
 
 # q1_contam = 'CTCTCCATCAAGCTATCGAATTCCTGCAGC'
 # q1_contam = 'ATCCACTAGTTCTAGAGCGG'
+
+## hack to reducew contamination by vector
 q1_contam1 = 'TTCTCTCCATCAAGCTATCGAATTCCTGCAGCC'
 q1_contam2 = 'GGGGGATCCACTAGTTCTA'
 
@@ -1073,7 +1077,7 @@ if nano:  # nano == True
     print(datetime.datetime.now())
 
 elif cas9:
-    print("CAS9 stuff???????????")
+    print("CAS9 processing:\n")
     print(datetime.datetime.now())
     pn = multiprocessing.Pool(ncpus)
     pi = multiprocessing.Pool(ncpus)
