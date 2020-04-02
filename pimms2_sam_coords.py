@@ -95,6 +95,8 @@ def process_gff(gff_file, gff_feat_type, gff_extra):
                                            'end',
                                            'feat_length',
                                            'product'] + gff_extra]  # add extra fields from gff
+    # fix to remove na values and allow joining with processed data also processed with fillna to allow group_by usage
+    gff_columns_addback.fillna('', inplace=True)
 
     data_top = gff_columns_addback.head()
     print(data_top)
@@ -202,6 +204,7 @@ def coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, cond
 
     coord_counts_df = coord_counts_df[coord_counts_df['counts'] >= min_depth_cutoff]
 
+    # format insertion site info as a GFF
     coord_counts_df_pimms2_gff = coord_counts_df.reset_index()
 
     coord_counts_df_pimms2_gff['source'] = 'pimms'
@@ -242,6 +245,11 @@ def coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, cond
     # this line should allow multi contig files
 
     coords_join_gff = ps.sqldf(sqlcode, locals())
+
+    # debugging save of intermediate data
+    coords_join_gff.to_csv("pimms_coords_join_gffstuff" + condition_label + ".txt", index=False, sep='\t', header=False)
+
+    # quick dataframe summary
     coords_join_gff.count
     ## add position as percentile (needs manual confirmation)
     coords_join_gff = coords_join_gff.assign(
@@ -254,6 +262,25 @@ def coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, cond
                     coords_join_gff.feat_length / 100))).round({"posn_as_percentile": 1})
     print(list(attr_to_columns.columns.values))
 
+    # coords_join_gff.to_csv("pimms_coords_join_gffstuff_test01" + condition_label + ".txt", index=False, sep='\t', header=False)
+
+    # pimms_result_table_test01_notgrouped = coords_join_gff[['seq_id', 'locus_tag', 'gene', 'start', 'end', 'feat_length', 'product'] + gff_extra]
+    # pimms_result_table_test01_notgrouped.to_csv("pimms_result_table_test01_notgrouped_" + condition_label + ".txt", index=False, sep='\t', header=True)
+    # coords_join_gff_fillna = coords_join_gff.fillna({'a': 0, 'b': 0})
+    # coords_join_gff_fillna = \
+
+    ### Important fix group by doesn't work -- any rows with nan values get dropped *yikes very bad!!!!*
+    coords_join_gff.fillna('', inplace=True)
+    # pimms_result_table_test01 = coords_join_gff.groupby(
+    #     ['seq_id', 'locus_tag', 'gene', 'start', 'end', 'feat_length', 'product']).agg(
+    #     num_insertions_mapped_per_feat=('counts', 'sum')#,
+    #     #num_insert_sites_per_feat=('counts', 'count'),
+    #     #first_insert_posn_as_percentile=('posn_as_percentile', 'min'),
+    #     #last_insert_posn_as_percentile=('posn_as_percentile', 'max')
+    # ).reset_index()
+    #
+    # pimms_result_table_test01.to_csv("pimms_result_table_test01_grouped_fillna1_" + condition_label + ".txt", index=False, sep='\t', header=True)
+
     pimms_result_table = coords_join_gff.groupby(
         ['seq_id', 'locus_tag', 'gene', 'start', 'end', 'feat_length', 'product'] + gff_extra).agg(
         num_insertions_mapped_per_feat=('counts', 'sum'),
@@ -261,6 +288,8 @@ def coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, cond
         first_insert_posn_as_percentile=('posn_as_percentile', 'min'),
         last_insert_posn_as_percentile=('posn_as_percentile', 'max')
     ).reset_index()
+
+    pimms_result_table.to_csv("pimms_coords_join_prt1_" + condition_label + ".txt", index=False, sep='\t', header=True)
 
     pimms_result_table = pimms_result_table.assign(num_insert_sites_per_feat_per_kb=(
             (pimms_result_table.num_insert_sites_per_feat / pimms_result_table.feat_length) * 1000),
@@ -272,6 +301,8 @@ def coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, cond
                            number_of_reads_mapped / 1e6))
     ).round({'num_insert_sites_per_feat_per_kb': 2, 'NRM_score': 2, 'NIM_score': 2})
     print(list(pimms_result_table.columns.values))
+
+    pimms_result_table.to_csv("pimms_coords_join_prt2_" + condition_label + ".txt", index=False, sep='\t', header=False)
 
     pimms_result_table = pimms_result_table[['seq_id',
                                              'locus_tag',
@@ -300,6 +331,11 @@ def coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, cond
                 'NRM_score': int(0),
                 'NIM_score': int(0)}
     pimms_result_table_full = pd.merge(gff_columns_addback, pimms_result_table, how='left').fillna(value=NAvalues)
+
+    gff_columns_addback.to_csv("pimms_coords_join_gff_columns_addback_" + condition_label + ".txt", index=False,
+                               sep='\t', header=False)
+    pimms_result_table_full.to_csv("pimms_coords_join_prtf1_" + condition_label + ".txt", index=False, sep='\t',
+                                   header=False)
 
     # if set add prefix to columns
     if condition_label:
