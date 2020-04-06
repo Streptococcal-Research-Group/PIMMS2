@@ -3,6 +3,8 @@ import sys
 # import datetime
 # import multiprocessing
 import pandas as pd
+# pd.set_option('mode.chained_assignment', 'raise')
+
 import gffpandas.gffpandas as gffpd
 import pandasql as ps
 import pysam
@@ -54,6 +56,10 @@ def process_gff(gff_file, gff_feat_type, gff_extra):
     annotation.to_gff3(gff_stem + '_pimms_features.gff')
     # break 9th gff column key=value pairs down to make additional columns
     attr_to_columns = annotation.attributes_to_columns()
+
+    if attr_to_columns.empty:
+        # return empty dataframes if no rows of required type are found print('attr_to_columns is empty!')
+        return attr_to_columns, attr_to_columns
     # attr_to_columns = attr_to_columns[attr_to_columns['type'] == gff_feat_type]  # filter to CDS
     # attr_to_columns = attr_to_columns.filter_feature_of_type(gff_feat_type)  # filter to gff_feat_type = ['CDS', 'tRNA', 'rRNA']
     # add feature length column and do some cleanup
@@ -98,9 +104,14 @@ def process_gff(gff_file, gff_feat_type, gff_extra):
                                            'start',
                                            'end',
                                            'feat_length',
-                                           'product'] + gff_extra]  # add extra fields from gff
+                                           'product'] + gff_extra].copy()  # add extra fields from gff
     # fix to remove na values and allow joining with processed data also processed with fillna to allow group_by usage
+    # note .copy on previous line
     gff_columns_addback.fillna('', inplace=True)
+    # gff_columns_addback.fillna(dict.fromkeys(['seq_id',
+    #                                           'locus_tag',
+    #                                           'type',
+    #                                           'gene'], 0), inplace=True)
 
     data_top = gff_columns_addback.head()
     print(data_top)
@@ -470,7 +481,7 @@ pimms_result_table_full = coordinates_to_features(sam_stem, attr_to_columns, gff
 if not gff_columns_addback_pseudo.empty:
     tag_psueudogenes = gff_columns_addback_pseudo['locus_tag']
     pimms_result_table_full.loc[pimms_result_table_full.locus_tag.isin(tag_psueudogenes), "type"] = \
-    pimms_result_table_full['type'] + '_pseudo'
+        pimms_result_table_full['type'] + '_pseudo'
 
 
 # write results as text/excel
