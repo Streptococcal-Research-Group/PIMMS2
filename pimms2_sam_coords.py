@@ -69,8 +69,11 @@ def process_gff(gff_file, gff_feat_type, gff_extra):
     #    columns=['product']).rename(columns={'product_nopc': 'product'})
 
     # attr_to_columns['product'] = attr_to_columns['product'].apply(ul.parse.unquote)
-    attr_to_columns['product'] = attr_to_columns['product'].fillna('').astype(str).apply(
-        ul.parse.unquote)  # added fix for None datatype
+    if 'product' not in attr_to_columns:
+        attr_to_columns['product'] = '-'
+    else:
+        attr_to_columns['product'] = attr_to_columns['product'].fillna('').astype(str).apply(
+            ul.parse.unquote)  # added fix for None datatype
     ## fix to skip requested extra gff annotation field if not present in GFF
     drop_gff_extra = []
     for field in gff_extra:
@@ -90,6 +93,7 @@ def process_gff(gff_file, gff_feat_type, gff_extra):
 
     gff_columns_addback = attr_to_columns[['seq_id',
                                            'locus_tag',
+                                           'type',
                                            'gene',
                                            'start',
                                            'end',
@@ -282,7 +286,7 @@ def coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, cond
     # pimms_result_table_test01.to_csv("pimms_result_table_test01_grouped_fillna1_" + condition_label + ".txt", index=False, sep='\t', header=True)
 
     pimms_result_table = coords_join_gff.groupby(
-        ['seq_id', 'locus_tag', 'gene', 'start', 'end', 'feat_length', 'product'] + gff_extra).agg(
+        ['seq_id', 'locus_tag', 'type', 'gene', 'start', 'end', 'feat_length', 'product'] + gff_extra).agg(
         num_insertions_mapped_per_feat=('counts', 'sum'),
         num_insert_sites_per_feat=('counts', 'count'),
         first_insert_posn_as_percentile=('posn_as_percentile', 'min'),
@@ -306,6 +310,7 @@ def coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, cond
 
     pimms_result_table = pimms_result_table[['seq_id',
                                              'locus_tag',
+                                             'type',
                                              'gene',
                                              'start',
                                              'end',
@@ -431,7 +436,10 @@ gff_columns_addback, attr_to_columns = process_gff(gff_file, gff_feat_type, gff_
 # trap multiple return values from function
 # gff_file = '/Users/svzaw/Data/PIMMS_redo/PIMMS2_stuff/PIMMS_V1/S.uberis_0140J.gff3'
 # gff_file = 'UK15_assembly_fix03.gff'
+gff_columns_addback_pseudo, attr_to_columns_pseudo = process_gff(gff_file, ['pseudogene'], [])
 
+# print(gff_columns_addback_pseudo)
+# print(attr_to_columns_pseudo)
 
 # exit()
 # set up various variables and commandline parameters
@@ -458,6 +466,12 @@ sam_stem = modify_sam_stem(sam_file)
 # allocate insertions to features and create results merged with GFF
 # possibly poor coding to merge with gff here
 pimms_result_table_full = coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, condition_label)
+
+if not gff_columns_addback_pseudo.empty:
+    tag_psueudogenes = gff_columns_addback_pseudo['locus_tag']
+    pimms_result_table_full.loc[pimms_result_table_full.locus_tag.isin(tag_psueudogenes), "type"] = \
+    pimms_result_table_full['type'] + '_pseudo'
+
 
 # write results as text/excel
 pimms_result_table_full.to_csv(sam_stem + "_countinfo_tab.txt", index=False, sep='\t')
