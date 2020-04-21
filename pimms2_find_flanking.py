@@ -218,12 +218,14 @@ findflank.add_argument("--fasta", required=False, nargs=1, metavar='ref_genome.f
                        help="fast file for reference genome ")
 findflank.add_argument("--nomap", required=False, action='store_true', default=False,
                        help="do not run mapping step")
-findflank.add_argument("--mapper", required=False, nargs='?', type=str, default='minimap2', choices=['minimap2', 'bwa'],
+findflank.add_argument("--mapper", required=False, nargs='?', type=str, default='bwa', choices=['minimap2', 'bwa'],
                        help="do not run mapping step")
 findflank.add_argument("--rmfiles", required=False, action='store_true', default=False,
                        help="remove intermediate files")
-findflank.add_argument("--lev", required=False, action='store_true', default=False,
-                       help="use Levenshtein distance of 1")
+# findflank.add_argument("--lev", required=False, action='store_true', default=False,
+#                       help="use Levenshtein distance of 1")
+findflank.add_argument("--lev", required=False, nargs='?', type=int, default=0,
+                       help="use Levenshtein distance (insert|del|sub)")
 findflank.add_argument("--sub", required=False, nargs=1, type=int, default=1,
                        help="number of permitted base substitutions in motif match [1]")
 findflank.add_argument("--insert", required=False, nargs=1, type=int, default=0,
@@ -323,7 +325,7 @@ cas9 = parsed_args[0].cas9
 # experimental decontaminate transposon/vector sequence
 # not currently effective try another implementation when time allows?
 decontam_tranposon = False
-fuzzy_levenshtein = parsed_args[0].lev
+fuzzy_levenshtein = bool(parsed_args[0].lev)
 
 # if decontam_tranposon == False:
 #     decon_tag = "nodecon"
@@ -335,14 +337,14 @@ fuzzy_levenshtein = parsed_args[0].lev
 # set up some variables:
 if nano | cas9:  # nano == True
     fuzzy_levenshtein = True
-    l_dist = 2  # maximum Levenshtein Distance
+    l_dist = parsed_args[0].lev  # maximum Levenshtein Distance
     min_length = 50
     max_length = 200
     print('overriding with Nanopore appropriate settings: Levenshtein distance of ' + str(
         l_dist) + ' + sequence length min = ' + str(min_length) + ', max = ' + str(max_length))
 else:
     subs = parsed_args[0].sub[0]
-    l_dist = 2  # maximum Levenshtein Distance
+    l_dist = parsed_args[0].lev  # maximum Levenshtein Distance
     insrt = parsed_args[0].insert[0]
     dels = parsed_args[0].deletion[0]
     min_length = parsed_args[0].min[0]
