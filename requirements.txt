@@ -1,0 +1,8 @@
+pandas==0.25.1
+ConfigArgParse==1.0
+fuzzysearch==0.7.0
+gffpandas==1.2.0
+pandasql==0.7.3
+pysam==0.15.4
+urllib3==1.24.2
+XlsxWriter==1.2.1

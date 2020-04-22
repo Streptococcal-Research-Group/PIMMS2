@@ -1,0 +1,11 @@
+    conda create --name pimms2env01
+    conda activate pimms2env01
+    conda install pip
+  
+    pip install -r requirements.txt
+    
+    python ./pimms2_sam_coords.py -h
+    python ./pimms2_sam_coords.py sam_extract -h
+ 
+    python ./pimms2_find_flanking.py -h
+    python ./pimms2_find_flanking.py find_flank -h
