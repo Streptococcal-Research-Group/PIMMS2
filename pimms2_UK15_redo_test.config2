@@ -10,8 +10,8 @@
   #fwdrev = _R1_,_R2_
 
   # use Levenshtein distance of 2
-  lev = False
-  sub = 0
+  lev = 0
+  sub = 1
   insert = 0
   del = 0
 

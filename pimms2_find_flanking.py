@@ -18,7 +18,7 @@ import shutil
 import fileinput
 import logging
 import logging.handlers
-
+#
 
 # from time import sleep
 # from random import random, randint
@@ -478,7 +478,7 @@ def pimms_fastq(fq_filename, fqout_filename):
             #         reject_reads_list.append(entry.name)
             #         continue
 
-            if fuzzy_levenshtein == False:
+            if fuzzy_levenshtein > 0:
                 matchesq1 = find_near_matches(qry1, entry.sequence, max_substitutions=subs, max_deletions=dels,
                                               max_insertions=insrt)
                 matchesq2 = find_near_matches(qry2, entry.sequence, max_substitutions=subs, max_deletions=dels,
