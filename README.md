@@ -12,7 +12,7 @@
     
 ### Simple usage    
 
-    conda activate pimms2env01  
+    conda activate pimms2  
 
     python ./pimms2_find_flanking.py find_flank -c pimms2.config --fasta <name>.fasta --mapper bwa --min 20 --max 50 --in_dir <name> --out_dir <name> --label test  
 
