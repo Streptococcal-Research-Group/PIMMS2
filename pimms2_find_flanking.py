@@ -18,7 +18,7 @@ import shutil
 import fileinput
 import logging
 import logging.handlers
-
+#
 
 # from time import sleep
 # from random import random, randint
@@ -478,7 +478,7 @@ def pimms_fastq(fq_filename, fqout_filename):
             #         reject_reads_list.append(entry.name)
             #         continue
 
-            if fuzzy_levenshtein == False:
+            if fuzzy_levenshtein > 0:
                 matchesq1 = find_near_matches(qry1, entry.sequence, max_substitutions=subs, max_deletions=dels,
                                               max_insertions=insrt)
                 matchesq2 = find_near_matches(qry2, entry.sequence, max_substitutions=subs, max_deletions=dels,
@@ -1106,6 +1106,12 @@ else:  # nano == False
     print(datetime.datetime.now())
     pi = multiprocessing.Pool(ncpus)
     for fq in glob.glob(fastq_dir + "*.fastq"):
+        if not (fwdrev_wc[0] in fq or fwdrev_wc[1] in fq):
+            print("ERROR(fastq): text substrings " + fwdrev_wc[0] + "/" + fwdrev_wc[
+                1] + " NOT FOUND in read filenanes (to identify illumina fwd/rev fastq files)")
+            print("ERROR(fastq): Check the fastq file names and/or update the --fwdrev parameter")
+            sys.exit(1)
+
         pi.apply_async(pimms_fastq,
                        args=(fq,
                              os.path.join(out_dir, Path(fq).stem + fq_result_suffix
@@ -1120,10 +1126,16 @@ else:  # nano == False
 
     pi = multiprocessing.Pool(ncpus)
     for fq in glob.glob(fastq_dir + "*q.gz"):
+        if not (fwdrev_wc[0] in fq or fwdrev_wc[1] in fq):
+            print("ERROR(fastq): text substrings " + fwdrev_wc[0] + "/" + fwdrev_wc[
+                1] + " NOT FOUND in read filenanes (to identify illumina fwd/rev fastq files)")
+            print("ERROR(fastq): Check the fastq file names and/or update the --fwdrev parameter")
+            sys.exit(1)
+
         fq_processed = os.path.join(out_dir, Path(Path(fq).stem).stem + fq_result_suffix)
         pi.apply_async(pimms_fastq,
                        args=(fq, fq_processed
-                             #os.path.join(out_dir, Path(Path(fq).stem).stem + fq_result_suffix)  # rmove double suffix
+                             # os.path.join(out_dir, Path(Path(fq).stem).stem + fq_result_suffix)  # rmove double suffix
                              )
                        )
 
