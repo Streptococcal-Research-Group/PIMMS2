@@ -3,7 +3,7 @@
 ## Getting Started
 
 ### Creating Conda Environment
-    conda create --name pimms2
+    conda create --name pimms2 python=3.6
     conda activate pimms2
     conda install pip
   
