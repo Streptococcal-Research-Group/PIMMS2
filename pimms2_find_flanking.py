@@ -6,10 +6,12 @@ from pathlib import Path
 import os
 import time
 import sys
+import random  # for log file names
 import re
 import configargparse
 import datetime
 import multiprocessing
+import pandas as pd
 import glob
 import gzip
 import pysam
@@ -81,7 +83,18 @@ def concat_fastq_raw(flanking_fastq_list, label, fq_file_suffix, out_dir):
     return (concat_fastq_result_filename)
 
 
+def mergeLogs(log_path):
+    log_files = glob.glob(os.path.join(log_path, "log_*txt"))
 
+    df_from_each_log = (pd.read_table(f) for f in log_files)
+    merged_logs_df = pd.concat(df_from_each_log, ignore_index=True)
+    merged_logs_df = merged_logs_df.sort_values(by=['fq_filename'])
+    log_sums = merged_logs_df.sum(numeric_only=True)
+    log_sums['fq_filename'] = 'COMBINED'
+    merged_logs_df = merged_logs_df.append(log_sums, ignore_index=True)
+    merged_logs_df.to_csv(os.path.join(log_path, "..", 'result_summary.txt'), sep='\t', index=False)
+    print(merged_logs_df.to_string(index=False))
+    return (merged_logs_df)
 
 
 
@@ -243,7 +256,7 @@ findflank.add_argument("--out_dir", required=False, nargs=1, metavar='DIR', defa
 # findflank.add_argument("--prefix", required=False, nargs=1, type=str, default="pimms2_condition",
 #                       help="prefix for output files")
 # findflank.add_argument("--cpus", required=False, nargs=1, type=int, default=int(os.cpu_count() / 2),
-findflank.add_argument("--cpus", required=False, nargs=1, type=int, default=int(6),
+findflank.add_argument("--cpus", required=False, nargs='?', type=int, default=int(6),
                        help="number of processors to use [(os.cpu_count() / 2)] ")
 findflank.add_argument("--max", required=True, nargs=1, type=int, default=60,
                        help="clip results to this length [illumina:60/nano:100")
@@ -320,6 +333,7 @@ fwdrev_wc = parsed_args[0].fwdrev[0].strip("'\"").split(',')
 # print(pimms_mls)
 
 ncpus = int(parsed_args[0].cpus)
+# ncpus = int(1)
 nano = parsed_args[0].nano
 cas9 = parsed_args[0].cas9
 # experimental decontaminate transposon/vector sequence
@@ -442,8 +456,10 @@ def pimms_fastq(fq_filename, fqout_filename):
     reject_reads_dict = dict()
     #   with pysam.FastxFile(fq_filename) as fin, gzip.open(fqout_filename + '.gz', mode='wb') as fout:
     with pysam.FastxFile(fq_filename, persist=False) as fin, open(fqout_filename, mode='wt') as fout:
+        # print(fqout_filename, '==\n')
         for entry in fin:
             count += 1
+            # print('*')#, entry)
             # if decontam_tranposon == True:
             #     matchescontam1 = find_near_matches(contam1, entry.sequence, max_substitutions=subs,
             #                                        max_deletions=dels,
@@ -478,7 +494,8 @@ def pimms_fastq(fq_filename, fqout_filename):
             #         reject_reads_list.append(entry.name)
             #         continue
 
-            if fuzzy_levenshtein > 0:
+            if not fuzzy_levenshtein:
+                # print('find_near_matches \n')
                 matchesq1 = find_near_matches(qry1, entry.sequence, max_substitutions=subs, max_deletions=dels,
                                               max_insertions=insrt)
                 matchesq2 = find_near_matches(qry2, entry.sequence, max_substitutions=subs, max_deletions=dels,
@@ -488,6 +505,7 @@ def pimms_fastq(fq_filename, fqout_filename):
                 matchesq2rc = find_near_matches(qry2rc, entry.sequence, max_substitutions=subs, max_deletions=dels,
                                                 max_insertions=insrt)
             else:
+                #print('find_near_matches lev\n')
                 matchesq1 = find_near_matches(qry1, entry.sequence, max_l_dist=l_dist)
                 matchesq2 = find_near_matches(qry2, entry.sequence, max_l_dist=l_dist)
                 matchesq1rc = find_near_matches(qry1rc, entry.sequence, max_l_dist=l_dist)
@@ -554,6 +572,7 @@ def pimms_fastq(fq_filename, fqout_filename):
 
                 if (len(captured_seqstring) >= min_length):
                     hit_q1_q2 += 1
+                    #print('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
                     fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
                     fout.write(captured_seqstring[0:max_length] + '\n')
                     fout.write('+' + '\n')
@@ -663,21 +682,36 @@ def pimms_fastq(fq_filename, fqout_filename):
     #                         'w')
     # for key, value in reject_reads_dict.items():
     #    reject_class_file.write(f'{key}\t{value}\n')
-        #reject_class_file.write(f'%s\n' % listitem)
+    # reject_class_file.write(f'%s\n' % listitem)
     # very cryptic logging needs reorganising and fixing to work with multiprocessing
-    log_file = open(f'{out_dir_logs}/log_{os.getppid()}_{multiprocessing.current_process().pid}.txt', 'w')
+    # note added random int  to get almost unique log file names need to find fix
+    log_file = open(
+        f'{out_dir_logs}/log_{os.getppid()}_{multiprocessing.current_process().pid}_{random.randint(1000, 9999)}.txt',
+        'w')
 
     # err_file = open(f'log_{os.getppid()}_{multiprocessing.current_process().pid}.err', 'w')
     try:
-        log_file.write(f'{fq_filename}: find flanking sequences report\n')
-        log_file.write(f'read count:\t{count}\n')
+        # log_file.write(f'{fq_filename}:\tcounts\n')
+        # log_file.write(f'read count:\t{count}\n')
+        # log_file.write(
+        #     f'match to both motifs (fwd|revcomp):\t{hit_q1_q2 + hit_q2rc_q1rc + hit_but_short_q1_q2 + hit_but_short_q2rc_q1rc}\n')
+        # log_file.write(f'match to multiple copies of a motif:\t{countqmulti}\n')
+        # log_file.write(f'match to mismatched motifs:\t{countqqrc}\n')
+        # log_file.write(f'match to both motifs (fwd|revcomp) >= {min_length}:\t{hit_q1_q2 + hit_q2rc_q1rc}\n')
+        # log_file.write(
+        #     f'match to single motif  >= {min_length}:\t{hit_q1_only + hit_q2_only + hit_q1rc_only + hit_q2rc_only}\n')
+        # modified logg formatting to allow concatenation by mergeLogs((
         log_file.write(
-            f'read match to both motifs (fwd|revcomp):\t{hit_q1_q2 + hit_q2rc_q1rc + hit_but_short_q1_q2 + hit_but_short_q2rc_q1rc}\n')
-        log_file.write(f'read match to both motifs (fwd|revcomp) >= {min_length}:\t{hit_q1_q2 + hit_q2rc_q1rc}\n')
-        log_file.write(f'read match to multiple copies of a motif:\t{countqmulti}\n')
-        log_file.write(f'read match to mismatched motifs:\t{countqqrc}\n')
+            f'fq_filename\tread count:\tmultiple copies of a motif:\tmismatched motifs:\tboth motifs (fwd|revcomp):\tboth motifs (fwd|revcomp) >= {min_length}:\tsingle motif  >= {min_length}:\ttotal passed\n')
+        log_file.write(f'{os.path.basename(fq_filename)}\t')
+        log_file.write(f'{count}\t')
+        log_file.write(f'{countqmulti}\t')
+        log_file.write(f'{countqqrc}\t')
         log_file.write(
-            f'read match to single motif  >= {min_length}:\t{hit_q1_only + hit_q2_only + hit_q1rc_only + hit_q2rc_only}\n')
+            f'{hit_q1_q2 + hit_q2rc_q1rc + hit_but_short_q1_q2 + hit_but_short_q2rc_q1rc}\t')
+        log_file.write(f'{hit_q1_q2 + hit_q2rc_q1rc}\t')
+        log_file.write(f'{hit_q1_only + hit_q2_only + hit_q1rc_only + hit_q2rc_only}\t')
+        log_file.write(f'{hit_q1_only + hit_q2_only + hit_q1rc_only + hit_q2rc_only + hit_q1_q2 + hit_q2rc_q1rc}\n')
     except Exception as e:
         # Write problems to the error file
         log_file.write(f'ERROR: problem with motif matching to {fq_filename}!\n')
@@ -685,27 +719,27 @@ def pimms_fastq(fq_filename, fqout_filename):
         # Close the files!
         log_file.close()
         # err_file.close()
-    print(fq_filename + "\n" + fqout_filename + "\n")
-    print("readcount\t", count)
-    print("q1\t", countq1)
-    print("q2\t", countq2)
-    print("q1rc\t", countq1rc)
-    print("q2rc\t", countq2rc)
-    print('')
-    print("q1q2\t", countq1q2)
-    print("hit q1q2\t", hit_q1_q2)
-    print("hit_but_short_q1_q2\t", hit_but_short_q1_q2)
-    # print("q1rcq2rc\t", countq1rcq2rc)
-    print('')
-    print("q2rcq1rc\t", countq2rcq1rc)
-    print("hit_q2rc_q1rc\t", hit_q2rc_q1rc)
-    print("hit_but_short_q2rc_q1rc\t", hit_but_short_q2rc_q1rc)
-    print('')
-    print('')
-    print("wrongq2q1\t", wrongq2q1)
-    print("wrongq1rcq2rc\t", wrongq1rcq2rc)
-    print("q + qrc\t", countqqrc)
-    print("q|qrc multi\t", countqmulti)
+    print("\n" + fq_filename + "\n" + fqout_filename + "\n\n")
+    # print("readcount\t", count)
+    # print("q1\t", countq1)
+    # print("q2\t", countq2)
+    # print("q1rc\t", countq1rc)
+    # print("q2rc\t", countq2rc)
+    # print('')
+    # print("q1q2\t", countq1q2)
+    # print("hit q1q2\t", hit_q1_q2)
+    # print("hit_but_short_q1_q2\t", hit_but_short_q1_q2)
+    # # print("q1rcq2rc\t", countq1rcq2rc)
+    # print('')
+    # print("q2rcq1rc\t", countq2rcq1rc)
+    # print("hit_q2rc_q1rc\t", hit_q2rc_q1rc)
+    # print("hit_but_short_q2rc_q1rc\t", hit_but_short_q2rc_q1rc)
+    # print('')
+    # print('')
+    # print("wrongq2q1\t", wrongq2q1)
+    # print("wrongq1rcq2rc\t", wrongq1rcq2rc)
+    # print("q + qrc\t", countqqrc)
+    # print("q|qrc multi\t", countqmulti)
     # print("contains contaminating ISS sequence tags \t", is_contam)
 
 
@@ -1055,13 +1089,33 @@ if nano:  # nano == True
                        # os.path.join(out_dir,
                        #             os.path.splitext(os.path.splitext(os.path.basename(fq))[0])[
                        #                 0] + fq_result_suffix
-                       #)  # output illumina fastq output filepath
+                       # )  # output illumina fastq output filepath
                        # (os.path.splitext(os.path.splitext(fq)[0])[0] + fq_result_suffix)))
                        )
         # )
 
     pi.close()
     pi.join()
+
+    pn = multiprocessing.Pool(ncpus)
+    pi = multiprocessing.Pool(ncpus)
+    for fq in glob.glob(fastq_dir + "*.fastq"):
+        fq_processed = os.path.join(out_dir, Path(Path(fq).stem).stem + fq_result_suffix)
+        flanking_fastq_result_list = flanking_fastq_result_list + [fq_processed]
+        pi.apply_async(pimms_fastq,
+                       args=(fq, fq_processed)
+                       # os.path.join(out_dir, Path(Path(fq).stem).stem + fq_result_suffix)  # rmove double suffix
+                       # os.path.join(out_dir,
+                       #             os.path.splitext(os.path.splitext(os.path.basename(fq))[0])[
+                       #                 0] + fq_result_suffix
+                       # )  # output illumina fastq output filepath
+                       # (os.path.splitext(os.path.splitext(fq)[0])[0] + fq_result_suffix)))
+                       )
+        # )
+
+    pi.close()
+    pi.join()
+
     # for fq in glob.glob(fastq_dir + "*q.gz") + glob.glob(fastq_dir + "*.fastq"):
     #     pn.apply_async(pimms_fastq,
     #                    args=(fq,  # input nanopore fastq filepath
@@ -1198,12 +1252,15 @@ print(flanking_fastq_result_list)
 # concat_result_fastq = concat_fastq(flanking_fastq_result_list, parsed_args[0].label[0], fq_result_suffix, out_dir)
 concat_result_fastq = concat_fastq_raw(flanking_fastq_result_list, label, fq_result_suffix, out_dir)
 
+# merge logs from different parallel cpus
+mergeLogs(out_dir_logs)
+
 ## do mapping stuff
 
 if parsed_args[0].nomap:
     print("Skipping mapping step...\n")
 else:
-    if mapper == 'minimap2':
+    if mapper == 'minimap2' or nano:
         sam_output_mm = os.path.splitext(parsed_args[0].fasta[0])[0] + '_' + label + re.sub('.sam', '_mm2.sam',
                                                                                             sam_result_suffix)
         sam_output_mm = os.path.join(out_dir, sam_output_mm)
@@ -1215,6 +1272,7 @@ else:
         sam_output_bwa = os.path.join(out_dir, sam_output_bwa)
         run_bwa(concat_result_fastq, sam_output_bwa, parsed_args[0].fasta[0])
         py_sam_to_bam(sam_output_bwa)
+
 # flanking_fastq_result_list
 
 
