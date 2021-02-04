@@ -1,5 +1,6 @@
 import os
 import sys
+import re
 # import datetime
 # import multiprocessing
 import pandas as pd
@@ -12,6 +13,9 @@ import urllib as ul
 import configargparse
 from pathlib import Path
 import shutil
+
+
+# test commit
 
 
 # import warnings
@@ -141,7 +145,7 @@ def process_sam(sam_file):
             continue
         STR = STRAND[int(read.is_reverse)]
         BED = [read.reference_name, read.pos, read.reference_end, ".", read.mapping_quality, STR,
-               '# ' + read.query_name]
+               '# ' + read.query_name]  # read group added
         f.write('\t'.join([str(i) for i in BED]))
         f.write('\n')
     f.close()
@@ -151,7 +155,7 @@ def process_sam(sam_file):
     samfile = pysam.AlignmentFile(sam_file)
     open(sam_stem + "_insert_coords.txt", 'w').close()
     f2 = open(sam_stem + "_insert_coords.txt", "a")
-    f2.write('\t'.join([str(i) for i in ['ref_name', 'coord', 'strand', 'read_name']]))
+    f2.write('\t'.join([str(i) for i in ['ref_name', 'coord', 'strand', 'read_name', 'read_grp']]))
     f2.write('\n')
     STRAND = ["+", "-"]
     for read in samfile.fetch():
@@ -167,11 +171,13 @@ def process_sam(sam_file):
         # print(STR)
         #continue
         if STR == '+':
-            COORDS = [read.reference_name, (read.reference_start + 4), STR, '# ' + read.query_name]
+            COORDS = [read.reference_name, (read.reference_start + 4), STR, '# ' + read.query_name,
+                      ':'.join(read.query_name.split(':', 4)[:4])]
             f2.write('\t'.join([str(i) for i in COORDS]))
             f2.write('\n')
         if STR == '-':
-            COORDS = [read.reference_name, (read.reference_end - 4), STR, '# ' + read.query_name]
+            COORDS = [read.reference_name, (read.reference_end - 4), STR, '# ' + read.query_name,
+                      ':'.join(read.query_name.split(':', 4)[:4])]
             f2.write('\t'.join([str(i) for i in COORDS]))
             f2.write('\n')
     f2.close()
@@ -203,6 +209,13 @@ def seqID_consistancy_check(mygffcolumns, my_sam):
     print(type(gff_seq_ID_list))
     print((sam_seq_ID_list))
     print((gff_seq_ID_list))
+
+
+def coordinates_to_features_reps(sam_stem, attr_to_columns, gff_columns_addback, condition_label):
+    coord_reps_df = pd.read_csv(sam_stem + "_insert_coords.txt", sep='\t', dtype={'ref_name': "str",
+                                                                                  'coord': "int64",
+                                                                                  'read_name': "str"})
+    coord_reps_df[['read_grp', 'remainder']] = coord_reps_df.read_name.str.split(expand=True)
 
 
 def coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, condition_label):
