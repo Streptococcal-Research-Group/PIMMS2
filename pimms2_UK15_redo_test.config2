@@ -40,7 +40,7 @@
   # gff = S.uberis_0140J.gff3
   # comma separated extra GFF3 annotation fields e.g 'ID,note,translation'
   # gff_extra = "ID"
-  min_depth = 3
+  min_depth = 0
   # mismatch as fraction of bases
   # mismatch =
 

@@ -232,13 +232,13 @@ findflank.add_argument("--fasta", required=False, nargs=1, metavar='ref_genome.f
 findflank.add_argument("--nomap", required=False, action='store_true', default=False,
                        help="do not run mapping step")
 findflank.add_argument("--mapper", required=False, nargs='?', type=str, default='bwa', choices=['minimap2', 'bwa'],
-                       help="do not run mapping step")
+                       help="select mapping software from available options")
 findflank.add_argument("--rmfiles", required=False, action='store_true', default=False,
                        help="remove intermediate files")
 # findflank.add_argument("--lev", required=False, action='store_true', default=False,
 #                       help="use Levenshtein distance of 1")
 findflank.add_argument("--lev", required=False, nargs='?', type=int, default=0,
-                       help="use Levenshtein distance (insert|del|sub)")
+                       help="use Levenshtein distance (combined insert|del|sub score)")
 findflank.add_argument("--sub", required=False, nargs=1, type=int, default=1,
                        help="number of permitted base substitutions in motif match [1]")
 findflank.add_argument("--insert", required=False, nargs=1, type=int, default=0,
@@ -269,7 +269,7 @@ findflank.add_argument("--motif2", required=False, nargs=1, type=str, default=['
                        # revcomp: TTTTTAAACTTTGCAACAGAACC
                        help="IS end reference motif2 [pGh9:GGTTCTGTTGCAAAGTTTAAAAA]")
 findflank.add_argument("--label", required=False, nargs=1, metavar='condition_name', default=[''],
-                       help="text tag to add to results file")
+                       help="identifying text tag to add to results file")
 
 parsed_args = ap.parse_known_args()
 
