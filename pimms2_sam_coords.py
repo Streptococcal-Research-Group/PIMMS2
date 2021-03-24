@@ -224,7 +224,8 @@ def coordinates_to_features_reps(sam_stem, attr_to_columns, condition_label):
 
     if len(read_grps) < 3:
         print("Warning: Unable to find >= 3 read groups in fastq data, continuing without replicate insertion counts")
-        return ()
+        # returning an empty dataframe
+        return pd.DataFrame()
 
     coord_df_pivot = coord_counts_reps_df.copy(deep=False).pivot_table(index=["ref_name", "coord"],
                                                                        columns=['read_grp'],
@@ -545,10 +546,12 @@ sam_stem = modify_sam_stem(sam_file)
 # possibly poor coding to merge with gff here
 pimms_result_table_full = coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, condition_label)
 
-if not any((parsed_args[0].noreps, pimms_result_table_full.empty)):
+if not parsed_args[0].noreps:
     mp_reps_feature_counts = coordinates_to_features_reps(sam_stem, attr_to_columns, condition_label)
-    merged_with_reps = pimms_result_table_full.merge(mp_reps_feature_counts, on=["seq_id", "start", "end"], how='inner')
-    pimms_result_table_full = merged_with_reps
+    if not mp_reps_feature_counts.empty:
+        merged_with_reps = pimms_result_table_full.merge(mp_reps_feature_counts, on=["seq_id", "start", "end"],
+                                                         how='inner')
+        pimms_result_table_full = merged_with_reps
 
 if not gff_columns_addback_pseudo.empty:
     tag_psueudogenes = gff_columns_addback_pseudo['locus_tag']
