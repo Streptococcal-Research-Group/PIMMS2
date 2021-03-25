@@ -129,7 +129,7 @@ def process_gff(gff_file, gff_feat_type, gff_extra):
 
 def modify_sam_stem(sam_file):
     sam_stem, sam_ext = os.path.splitext(os.path.basename(sam_file))
-    sam_stem: str = sam_stem + '_md' + str(min_depth_cutoff) + '_mm' + str(fraction_mismatch or '')
+    sam_stem: str = sam_stem + '_md' + str(min_depth_cutoff) + '_mm' + str(fraction_mismatch or '0')
     return sam_stem
 
 
@@ -446,7 +446,7 @@ ap = configargparse.ArgumentParser(  # description='PIMMS2 sam/bam processing',
     epilog="\n\n*** N.B. This is a development version ***\n \n ",
     description='''description here'''
 )
-ap.add_argument('--version', action='version', version='%(prog)s 2.0.1 demo')
+ap.add_argument('--version', action='version', version='%(prog)s 2.0.2 demo')
 ap.add_argument('--nano', action='store_true', required=False,
                 help='global setting to change processing to nanopore data [False: illumina processing]')
 modes = ap.add_subparsers(parser_class=configargparse.ArgParser)
