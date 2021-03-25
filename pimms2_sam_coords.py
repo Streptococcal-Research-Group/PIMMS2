@@ -546,7 +546,7 @@ sam_stem = modify_sam_stem(sam_file)
 # possibly poor coding to merge with gff here
 pimms_result_table_full = coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, condition_label)
 
-if not parsed_args[0].noreps:
+if not parsed_args[0].noreps | parsed_args[0].nano:
     mp_reps_feature_counts = coordinates_to_features_reps(sam_stem, attr_to_columns, condition_label)
     if not mp_reps_feature_counts.empty:
         merged_with_reps = pimms_result_table_full.merge(mp_reps_feature_counts, on=["seq_id", "start", "end"],

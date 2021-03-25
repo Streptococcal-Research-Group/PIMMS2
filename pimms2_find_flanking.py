@@ -350,6 +350,7 @@ fuzzy_levenshtein = bool(parsed_args[0].lev)
 
 # set up some variables:
 if nano | cas9:  # nano == True
+
     fuzzy_levenshtein = True
     l_dist = parsed_args[0].lev  # maximum Levenshtein Distance
     min_length = 50
