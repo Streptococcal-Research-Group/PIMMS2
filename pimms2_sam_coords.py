@@ -102,6 +102,7 @@ def process_gff(gff_file, gff_feat_type, gff_extra):
                 ul.parse.unquote)  # added fix for None datatype
 
     gff_columns_addback = attr_to_columns[['seq_id',
+                                           'ID',  # additional hopefully unique feature ID
                                            'locus_tag',
                                            'type',
                                            'gene',
@@ -128,7 +129,7 @@ def process_gff(gff_file, gff_feat_type, gff_extra):
 
 def modify_sam_stem(sam_file):
     sam_stem, sam_ext = os.path.splitext(os.path.basename(sam_file))
-    sam_stem: str = sam_stem + '_md' + str(min_depth_cutoff) + '_mm' + str(fraction_mismatch or '')
+    sam_stem: str = sam_stem + '_md' + str(min_depth_cutoff) + '_mm' + str(fraction_mismatch or '0')
     return sam_stem
 
 
@@ -211,11 +212,60 @@ def seqID_consistancy_check(mygffcolumns, my_sam):
     print((gff_seq_ID_list))
 
 
-def coordinates_to_features_reps(sam_stem, attr_to_columns, gff_columns_addback, condition_label):
+def coordinates_to_features_reps(sam_stem, attr_to_columns, condition_label):
     coord_reps_df = pd.read_csv(sam_stem + "_insert_coords.txt", sep='\t', dtype={'ref_name': "str",
                                                                                   'coord': "int64",
-                                                                                  'read_name': "str"})
-    coord_reps_df[['read_grp', 'remainder']] = coord_reps_df.read_name.str.split(expand=True)
+                                                                                  'read_grp': "str"})
+
+    coord_counts_reps_df = coord_reps_df.groupby(["ref_name", "coord", "read_grp"]).size().reset_index(
+        name=condition_label + '_')
+
+    read_grps = sorted(coord_reps_df.read_grp.unique())
+
+    if len(read_grps) < 3:
+        print("Warning: Unable to find >= 3 read groups in fastq data, continuing without replicate insertion counts")
+        # returning an empty dataframe
+        return pd.DataFrame()
+
+    coord_df_pivot = coord_counts_reps_df.copy(deep=False).pivot_table(index=["ref_name", "coord"],
+                                                                       columns=['read_grp'],
+                                                                       values=[condition_label + '_'],
+                                                                       fill_value=0).reset_index()
+
+    coord_df_pivot.columns = [''.join(col).strip() for col in coord_df_pivot.columns.values]
+
+    old_rep_names = [condition_label + '_' + str(x) for x in read_grps]
+    new_rep_names = [condition_label + '_' + "MP" + str(x) for x in range(1, len(read_grps) + 1)]
+
+    coord_df_pivot.rename(columns=dict(zip(old_rep_names, new_rep_names)), inplace=True)
+
+    attr_to_columns_short = attr_to_columns[["seq_id", "start", "end"]]
+
+    sqlcode = '''
+        select coord_df_pivot.*
+        ,attr_to_columns_short.*
+        from attr_to_columns_short
+        left join coord_df_pivot
+        on coord_df_pivot.coord between attr_to_columns_short.start and attr_to_columns_short.end
+        where coord_df_pivot.ref_name like '%' || attr_to_columns_short.seq_id || '%'
+        '''
+    ## wierd sqlite concatenation + >> || ,  '%' == wildcard double check effect of this
+    # this line should allow multi contig files
+
+    mp_coords_join_gff = ps.sqldf(sqlcode, locals())
+
+    # remove first 2 columns ref_name, coord sums the rest according to the feature coordinate groups
+    mp_reps_feature_counts = mp_coords_join_gff.drop(mp_coords_join_gff.columns[[0, 1]], axis=1).groupby(
+        ['seq_id', 'start', 'end']).agg(["sum"]).reset_index()
+
+    mp_reps_feature_counts.columns = mp_reps_feature_counts.columns.get_level_values(0)
+    return mp_reps_feature_counts
+
+    # coord_df_pivot.to_csv("pimms_insert_MP_coordinates_" + condition_label + ".txt", index=False, sep='\t', header=True)
+    # attr_to_columns.to_csv("pimms_insert_attr_to_columns_" + condition_label + ".txt", index=False, sep='\t',
+    #                        header=True)
+    # gff_columns_addback.to_csv("pimms_insert_gff_columns_addback_" + condition_label + ".txt", index=False, sep='\t',
+    #                            header=True)
 
 
 def coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, condition_label):
@@ -235,7 +285,7 @@ def coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, cond
     # format insertion site info as a GFF
     coord_counts_df_pimms2_gff = coord_counts_df.reset_index()
 
-    coord_counts_df_pimms2_gff['source'] = 'pimms'
+    coord_counts_df_pimms2_gff['source'] = 'pimms2'
     coord_counts_df_pimms2_gff['feature_type'] = 'misc_feature'
     coord_counts_df_pimms2_gff['strand'] = '.'
     coord_counts_df_pimms2_gff['phase'] = '.'
@@ -245,7 +295,8 @@ def coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, cond
     coord_counts_df_pimms2_gff = coord_counts_df_pimms2_gff[
         ['ref_name', 'source', 'feature_type', 'start', 'stop', 'score', 'strand', 'phase', 'info']]
     print(coord_counts_df_pimms2_gff.head())
-    coord_counts_df_pimms2_gff.to_csv("pimms_" + condition_label + ".gff", index=False, sep='\t', header=False)
+    coord_counts_df_pimms2_gff.to_csv("pimms_insert_coordinates_" + condition_label + ".gff", index=False, sep='\t',
+                                      header=False)
 
     # added .loc to fix warning
     # SettingWithCopyWarning:
@@ -310,7 +361,8 @@ def coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, cond
     # pimms_result_table_test01.to_csv("pimms_result_table_test01_grouped_fillna1_" + condition_label + ".txt", index=False, sep='\t', header=True)
 
     pimms_result_table = coords_join_gff.groupby(
-        ['seq_id', 'locus_tag', 'type', 'gene', 'start', 'end', 'feat_length', 'product'] + gff_extra).agg(
+        ['seq_id', 'ID',  # added ID field as unique identifier
+         'locus_tag', 'type', 'gene', 'start', 'end', 'feat_length', 'product'] + gff_extra).agg(
         num_insertions_mapped_per_feat=('counts', 'sum'),
         num_insert_sites_per_feat=('counts', 'count'),
         first_insert_posn_as_percentile=('posn_as_percentile', 'min'),
@@ -333,6 +385,7 @@ def coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, cond
     pimms_result_table.to_csv("pimms_coords_join_prt2_" + condition_label + ".txt", index=False, sep='\t', header=False)
 
     pimms_result_table = pimms_result_table[['seq_id',
+                                             'ID',
                                              'locus_tag',
                                              'type',
                                              'gene',
@@ -393,7 +446,7 @@ ap = configargparse.ArgumentParser(  # description='PIMMS2 sam/bam processing',
     epilog="\n\n*** N.B. This is a development version ***\n \n ",
     description='''description here'''
 )
-ap.add_argument('--version', action='version', version='%(prog)s 2.0.1 demo')
+ap.add_argument('--version', action='version', version='%(prog)s 2.0.2 demo')
 ap.add_argument('--nano', action='store_true', required=False,
                 help='global setting to change processing to nanopore data [False: illumina processing]')
 modes = ap.add_subparsers(parser_class=configargparse.ArgParser)
@@ -418,6 +471,8 @@ samcoords.add_argument("--mismatch", required=False, nargs=1, type=float, metava
                        help="fraction of permitted mismatches in mapped read ( 0 <= float < 0.2 [no filter]")
 samcoords.add_argument("--min_depth", required=False, nargs=1, type=int, default=2, metavar='int',
                        help="minimum read depth at insertion site >= int [2]")
+samcoords.add_argument("--noreps", required=False, action='store_true', default=False,
+                       help="do not separate illumina read groups as replicate insertion count columns")
 samcoords.add_argument("--gff", required=True, nargs=1, type=extant_file, default='', metavar='genome.gff',
                        help="GFF3 formatted file to use\n(note fasta sequence present in the file must be deleted before use)")
 samcoords.add_argument("--gff_extra", required=False, nargs=1, type=str, default='', metavar="'x,y,z'",
@@ -491,11 +546,17 @@ sam_stem = modify_sam_stem(sam_file)
 # possibly poor coding to merge with gff here
 pimms_result_table_full = coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, condition_label)
 
+if not parsed_args[0].noreps | parsed_args[0].nano:
+    mp_reps_feature_counts = coordinates_to_features_reps(sam_stem, attr_to_columns, condition_label)
+    if not mp_reps_feature_counts.empty:
+        merged_with_reps = pimms_result_table_full.merge(mp_reps_feature_counts, on=["seq_id", "start", "end"],
+                                                         how='inner')
+        pimms_result_table_full = merged_with_reps
+
 if not gff_columns_addback_pseudo.empty:
     tag_psueudogenes = gff_columns_addback_pseudo['locus_tag']
     pimms_result_table_full.loc[pimms_result_table_full.locus_tag.isin(tag_psueudogenes), "type"] = \
         pimms_result_table_full['type'] + '_pseudo'
-
 
 # write results as text/excel
 pimms_result_table_full.to_csv(sam_stem + "_countinfo_tab.txt", index=False, sep='\t')
