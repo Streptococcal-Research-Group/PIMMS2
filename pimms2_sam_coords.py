@@ -1,11 +1,6 @@
 import os
 import sys
-import re
-# import datetime
-# import multiprocessing
 import pandas as pd
-# pd.set_option('mode.chained_assignment', 'raise')
-
 import gffpandas.gffpandas as gffpd
 import pandasql as ps
 import pysam
@@ -489,13 +484,12 @@ if len(sys.argv) <= 2:
 
 # do command line processing
 
-
+print("##########")
 print(parsed_args)
 print("----------")
-# print(ap.format_help())
 print("----------")
 print(ap.format_values())  # useful for logging where different settings came from
-
+print("##########")
 # exit()
 # find required orog in path or exit with message
 # prog_in_path_check('minimap2')
