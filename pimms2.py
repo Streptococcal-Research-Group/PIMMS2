@@ -849,8 +849,8 @@ ap = configargparse.ArgumentParser(  # description='PIMMS2 sam/bam processing',
     description='''description here'''
 )
 ap.add_argument('-v', '--version', action='version', version='%(prog)s 2.0.3 demo')
-ap.add_argument('--nano', action='store_true', required=False,
-                help='global setting to change processing to nanopore data [False: illumina processing]')
+# ap.add_argument('--nano', action='store_true', required=False,
+#                help='global setting to change processing to nanopore data [False: illumina processing]')
 
 modes = ap.add_subparsers(parser_class=configargparse.ArgParser, dest='command')
 
@@ -931,6 +931,8 @@ samcoords.add_argument("-c", "--config", required=False, is_config_file=True,  #
                        help="use parameters from config file")
 samcoords.add_argument("--sam", required=True, nargs=1, metavar='pimms.sam/bam', type=extant_file,
                        help="sam/bam file of mapped IS flanking sequences ")
+samcoords.add_argument("--nano", required=False, action='store_true', default=False,
+                       help="override with settings more suitable for nanopore")
 samcoords.add_argument("--label", required=False, nargs=1, metavar='condition_name', default=[''],
                        help="text tag to add to results file")
 samcoords.add_argument("--mismatch", required=False, nargs=1, type=float, metavar='float', default=[None],
@@ -1039,7 +1041,7 @@ if parsed_args[0].command == 'find_flank':
 
     # set up some variables:
     if nano:  # nano == True
-
+        #parsed_args[0].noreps = True
         fuzzy_levenshtein = True
         l_dist = parsed_args[0].lev  # maximum Levenshtein Distance
         min_length = 50
@@ -1292,6 +1294,8 @@ if parsed_args[0].command == 'find_flank':
 
 elif parsed_args[0].command == 'sam_extract':
 
+    if parsed_args[0].nano:
+        parsed_args[0].noreps = True
     # sort out extra requested gff annotation fields
     if parsed_args[0].gff_extra:
         # strip any formatting quotes and turn comma separated string into a list of fields
@@ -1337,13 +1341,17 @@ elif parsed_args[0].command == 'sam_extract':
     # allocate insertions to features and create results merged with GFF
     # possibly poor coding to merge with gff here
     pimms_result_table_full = coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, condition_label)
-
-    if not parsed_args[0].noreps | parsed_args[0].nano:
+    # if parsed_args[0].nano:
+    #    print("--noreps forced for nanopore data\n")
+    if not parsed_args[0].noreps:
+        print("processing read groups as replicates for illumina data\n")
         mp_reps_feature_counts = coordinates_to_features_reps(sam_stem, attr_to_columns, condition_label)
         if not mp_reps_feature_counts.empty:
             merged_with_reps = pimms_result_table_full.merge(mp_reps_feature_counts, on=["seq_id", "start", "end"],
                                                              how='inner')
             pimms_result_table_full = merged_with_reps
+    else:
+        print("not processing read groups as replicates\n")
 
     if not gff_columns_addback_pseudo.empty:
         tag_psueudogenes = gff_columns_addback_pseudo['locus_tag']
