@@ -1,17 +1,15 @@
 [general]
-  # global settings
-  nano = False
-
+  # global settings (not in use)
 
 [find_flank]
   # illumina single end reads (un-paired) [default: illumina paired end]
-  single = False
+  # nano = True
 
   #fwdrev = _R1_,_R2_
 
   # use Levenshtein distance of 2
-  lev = 0
-  sub = 1
+  lev = 1
+  sub = 0
   insert = 0
   del = 0
 
@@ -38,9 +36,9 @@
   #
   gff = UK15_redo_ucbold_fix02.gff
   # gff = S.uberis_0140J.gff3
-  # comma separated extra GFF3 annotation fields e.g 'ID,note,translation'
-  # gff_extra = "ID"
-  min_depth = 0
+  # comma separated extra GFF3 annotation fields e.g 'note,translation'
+  # gff_extra = 'note'
+  min_depth = 3
   # mismatch as fraction of bases
   # mismatch =
 

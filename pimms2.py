@@ -823,9 +823,9 @@ def coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, cond
 ############################
 
 
-pimms_mls = """
+pimms_mssg = """
 ===========================================================================================================
-Pragmatic Insertional Mutation Mapping system (PIMMS) mapping pipeline 2
+Pragmatic Insertional Mutation Mapping system (PIMMS) mapping pipeline v2
 ===========================================================================================================
        o         o
        o         o
@@ -838,8 +838,12 @@ Pragmatic Insertional Mutation Mapping system (PIMMS) mapping pipeline 2
    |@@@@|    |@@@@|   @@       @@    @@     @@  @@     @@       @@     @@
    |@@@@|    |@@@@|   @@     @@@@@@  @@     @@  @@     @@  @@@@@@@   @@@@@@@@
 ===========================================================================================================
-python PIMMS2 test script.....
-===========================================================================================================\n"""
+PIMMS2 """
+
+pimms_mssg2 = """ mode
+===========================================================================================================
+
+"""
 
 ap = configargparse.ArgumentParser(  # description='PIMMS2 sam/bam processing',
     prog="pimms2",
@@ -861,12 +865,12 @@ findflank = modes.add_parser("find_flank", add_config_file_help=False,
 samcoords = modes.add_parser("sam_extract", add_config_file_help=False,
                              help="Mode: extract insertion site coordinates from sam file",
                              description="Args that start with '--' (eg. --sam) can also be set in a config file (specified via -c)")
+# tablemerge = modes.add_parser("table_merge", add_config_file_help=False,
+#                             help='Mode: merge two compatible PIMMS results tables (N.B: this step does a simple table join and does not check the data)')
+# tablemerge.add_argument("--rmreps", required=False, action='store_true', default=False,
+#                        help="remove mutant pool reps columns")
 tablemerge = modes.add_parser("table_merge", add_config_file_help=False,
-                              help='Mode: merge two compatible PIMMS results tables (N.B: this step does a simple table join and does not check the data)')
-tablemerge.add_argument("--rmreps", required=False, action='store_true', default=False,
-                        help="remove mutant pool reps columns")
-tablemerge = modes.add_parser("table_merge",
-                              help='Mode: merge two compatible PIMMS results tables').add_mutually_exclusive_group()
+                              help='Mode: merge two compatible PIMMS results tables (N.B: this step does a simple table join and does not check the data)').add_mutually_exclusive_group()
 # tablemerge.add_mutually_exclusive_group()
 otherstuff = modes.add_parser("other_stuff", help='Mode: do other good PIMMS related stuff')
 # Add the arguments to the parser
@@ -963,6 +967,10 @@ tablemerge.add_argument("--tsv", required=False, nargs=2, type=extant_file,
 # tablemerge.add_argument("results_table_2", help="results table 2", required=True)
 parsed_args = ap.parse_known_args()
 
+if parsed_args[0].command == 'other_stuff':
+    print("\nThis is a place holder for adding more functionality to PIMMS2.\n" +
+          "Please contact the developers if you have requests for expanding PIMMS2 capabilities.\n\n")
+
 # exit and print short help message if no mode/arguments supplied
 if len(sys.argv) <= 2:
     ap.print_usage()
@@ -970,23 +978,28 @@ if len(sys.argv) <= 2:
 
 # do command line processing
 
-print("##########")
-print(parsed_args)
-print("----------")
+# print("##########")
+# print(parsed_args)
+# print("----------")
 from pprint import pprint
 
-print("##########")
+# print("##########")
 print(ap.format_values())  # useful for logging where different settings came from
-print(parsed_args[0].command)
-print("----------======")
+# print("\n\n\n")
+# print(parsed_args[0].command)
+
+
+# print("----------======")
 # print(ap.)
 
 # sys.exit(1)
 
+### FIND_FLANK ###
+
 if parsed_args[0].command == 'find_flank':
-
+    print(pimms_mssg + parsed_args[0].command + pimms_mssg2)
     # print((vars(parsed_args)))
-
+    # sys.exit(1)
     # config_file = parsed_args.config_file[0]
 
     # construct config parser
@@ -1291,8 +1304,11 @@ if parsed_args[0].command == 'find_flank':
             run_bwa(concat_result_fastq, sam_output_bwa, parsed_args[0].fasta[0])
             py_sam_to_bam(sam_output_bwa)
 
+### SAM_EXTRACT ###
 
 elif parsed_args[0].command == 'sam_extract':
+
+    print(pimms_mssg + parsed_args[0].command + pimms_mssg2)
 
     if parsed_args[0].nano:
         parsed_args[0].noreps = True
@@ -1368,7 +1384,10 @@ elif parsed_args[0].command == 'sam_extract':
     writer.save()
 
 
+### TABLE_MERGE ###
+
 elif parsed_args[0].command == 'table_merge':
+    print(pimms_mssg + parsed_args[0].command + pimms_mssg2)
     if parsed_args[0].xlsx:
         print("Join: ", parsed_args[0].xlsx[0], "\t", parsed_args[0].xlsx[1], "\n")
         # requires openpyxl dependancy installed
@@ -1394,3 +1413,7 @@ elif parsed_args[0].command == 'table_merge':
         results_merged.to_csv('merged_result.txt', index=False, sep="\t")
     else:
         print("\nUnable to merge results tables\n")
+
+elif parsed_args[0].command == 'other_stuff':
+    print("'other_stuff' is a place holder for adding more functionality to PIMMS2.\n" +
+          "Please contact the developers if you have requests for expanding PIMMS2 .")
