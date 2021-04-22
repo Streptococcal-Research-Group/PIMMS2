@@ -1232,9 +1232,7 @@ if parsed_args[0].command == 'find_flank':
         print(datetime.datetime.now())
 
         ## match fwdrev match substrings e.g: _R1_/_R2_ --fwdrev parameter
-        fqp_results_f
-
-        wd = sorted(glob.glob(os.path.join(out_dir, "*" + fwdrev_wc[0] + "*" + fq_result_suffix)))
+        fqp_results_fwd = sorted(glob.glob(os.path.join(out_dir, "*" + fwdrev_wc[0] + "*" + fq_result_suffix)))
         fqp_results_rev = sorted(glob.glob(os.path.join(out_dir, "*" + fwdrev_wc[1] + "*" + fq_result_suffix)))
         print(fqp_results_fwd)
         print(fqp_results_rev)
