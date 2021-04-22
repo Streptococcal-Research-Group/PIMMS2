@@ -461,7 +461,11 @@ def process_gff(gff_file, gff_feat_type, gff_extra):
 
     gff_stem, gff_ext = os.path.splitext(os.path.basename(gff_file))
 
-    annotation.to_gff3(gff_stem + '_pimms_features.gff')
+    if gff_feat_type[0] == "pseudogene":
+        annotation.to_gff3(gff_stem + '_pimms_features_pseudogene.gff')
+    else:
+        annotation.to_gff3(gff_stem + '_pimms_features.gff')
+
     # break 9th gff column key=value pairs down to make additional columns
     attr_to_columns = annotation.attributes_to_columns()
 
@@ -831,12 +835,12 @@ Pragmatic Insertional Mutation Mapping system (PIMMS) mapping pipeline v2
        o         o
       //        //
      //        //
-   |_||_|    |_||_|   @@@@@  @@@@@@  @@     @@  @@     @@   @@@@@@    @@@@@@
-   |@||@|    |@||@|   @@  @@   @@    @@@@ @@@@  @@@@ @@@@  @@        @@    @@
-   |@||@|    |@||@|   @@@@@    @@    @@ @@@ @@  @@ @@@ @@   @@@           @@
-   |@||@|    |@||@|   @@       @@    @@  @  @@  @@  @  @@     @@@        @@
-   |@@@@|    |@@@@|   @@       @@    @@     @@  @@     @@       @@     @@
-   |@@@@|    |@@@@|   @@     @@@@@@  @@     @@  @@     @@  @@@@@@@   @@@@@@@@
+   |_||_|    |_||_|   @@@@@  @@@@@@  @@     @@  @@     @@   @@@@@@     @@@@@@
+   |@||@|    |@||@|   @@  @@   @@    @@@@ @@@@  @@@@ @@@@  @@         @@    @@
+   |@||@|    |@||@|   @@@@@    @@    @@ @@@ @@  @@ @@@ @@   @@@            @@
+   |@||@|    |@||@|   @@       @@    @@  @  @@  @@  @  @@     @@@         @@
+   |@@@@|    |@@@@|   @@       @@    @@     @@  @@     @@       @@      @@
+   |@@@@|    |@@@@|   @@     @@@@@@  @@     @@  @@     @@  @@@@@@@    @@@@@@@@
 ===========================================================================================================
 PIMMS2 """
 
@@ -894,7 +898,7 @@ findflank.add_argument("--rmfiles", required=False, action='store_true', default
                        help="remove intermediate files")
 # findflank.add_argument("--lev", required=False, action='store_true', default=False,
 #                       help="use Levenshtein distance of 1")
-findflank.add_argument("--lev", required=False, nargs='?', type=int, default=0,
+findflank.add_argument("--lev", required=False, nargs=1, type=int, default=0,
                        help="use Levenshtein distance (combined insert|del|sub score)")
 findflank.add_argument("--sub", required=False, nargs=1, type=int, default=1,
                        help="number of permitted base substitutions in motif match [1]")
@@ -1050,7 +1054,7 @@ if parsed_args[0].command == 'find_flank':
     # experimental decontaminate transposon/vector sequence
     # not currently effective try another implementation when time allows?
     decontam_tranposon = False
-    fuzzy_levenshtein = bool(parsed_args[0].lev)
+    fuzzy_levenshtein = bool(parsed_args[0].lev[0])
 
     # set up some variables:
     if nano:  # nano == True
@@ -1063,7 +1067,7 @@ if parsed_args[0].command == 'find_flank':
             l_dist) + ' + sequence length min = ' + str(min_length) + ', max = ' + str(max_length))
     else:
         subs = parsed_args[0].sub[0]
-        l_dist = parsed_args[0].lev  # maximum Levenshtein Distance
+        l_dist = parsed_args[0].lev[0]  # maximum Levenshtein Distance
         insrt = parsed_args[0].insert[0]
         dels = parsed_args[0].deletion[0]
         min_length = parsed_args[0].min[0]
@@ -1228,7 +1232,9 @@ if parsed_args[0].command == 'find_flank':
         print(datetime.datetime.now())
 
         ## match fwdrev match substrings e.g: _R1_/_R2_ --fwdrev parameter
-        fqp_results_fwd = sorted(glob.glob(os.path.join(out_dir, "*" + fwdrev_wc[0] + "*" + fq_result_suffix)))
+        fqp_results_f
+
+        wd = sorted(glob.glob(os.path.join(out_dir, "*" + fwdrev_wc[0] + "*" + fq_result_suffix)))
         fqp_results_rev = sorted(glob.glob(os.path.join(out_dir, "*" + fwdrev_wc[1] + "*" + fq_result_suffix)))
         print(fqp_results_fwd)
         print(fqp_results_rev)
@@ -1338,9 +1344,6 @@ elif parsed_args[0].command == 'sam_extract':
     min_depth_cutoff = parsed_args[0].min_depth[0]
     # permitted_mismatch = 6
     fraction_mismatch = parsed_args[0].mismatch[0]
-    # sam_file = "0140J_test.IN.PIMMS.RX.rmIS.sub0_min25_max50.ngm_sensitive.90pc.bam"
-    # sam_file = "UK15_Media_RX_pimms2out_trim60_v_pGh9_UK15.bam"
-    # sam_file = "UK15_Blood_RX_pimms2out_trim60_v_pGh9_UK15.bam"
     sam_file = parsed_args[0].sam[0]
     condition_label = parsed_args[0].label[0]
 
@@ -1416,4 +1419,4 @@ elif parsed_args[0].command == 'table_merge':
 
 elif parsed_args[0].command == 'other_stuff':
     print("'other_stuff' is a place holder for adding more functionality to PIMMS2.\n" +
-          "Please contact the developers if you have requests for expanding PIMMS2 .")
+          "Please contact the developers if you have requests for expanding PIMMS2 data analysis functions.")
