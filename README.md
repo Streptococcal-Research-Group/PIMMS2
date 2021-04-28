@@ -12,6 +12,8 @@
     
 ### Simple usage    
 
+	All parameters can be set in the pimms2.config file or you can specify them on the command line
+
     conda activate pimms2  
 
     python ./pimms2.py find_flank -c pimms2.config --fasta <name>.fasta --mapper bwa --min 20 --max 50 --in_dir <name> --out_dir <name> --label test  
@@ -46,7 +48,7 @@
     --motif2 MOTIF2       IS end reference motif2 [e.g. pGh9:GGTTCTGTTGCAAAGTTTAAAAA]  
     --label condition     Text tag to add to results file  
 
-    python ./pimms2_sam_coords.py sam_extract -h  
+    python ./pimms2.py sam_extract -h  
     
     Arguments:  
     -h, --help            show this help message and exit  
