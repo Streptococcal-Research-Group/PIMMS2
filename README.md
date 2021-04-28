@@ -21,7 +21,7 @@
 
 ### Options and Usage
 
-    python ./pimms2_find_flanking.py find_flank -h  
+    python ./pimms2.py find_flank -h  
     
     Arguments:  
     -h, --help            show this help message and exit  
