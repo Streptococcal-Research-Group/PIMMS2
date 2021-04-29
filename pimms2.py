@@ -629,6 +629,8 @@ def coordinates_to_features_reps(sam_stem, attr_to_columns, condition_label):
         name=condition_label + '_')
 
     read_grps = sorted(coord_reps_df.read_grp.unique())
+    print(str(len(read_grps)) + ' readgroups (mutant pools) found:')
+    print('\n'.join(read_grps))
 
     if len(read_grps) < 3:
         print("Warning: Unable to find >= 3 read groups in fastq data, continuing without replicate insertion counts")
