@@ -1002,7 +1002,7 @@ def parse_arguments():
     findflank.add_argument("--out_dir", required=False, nargs=1, metavar='out_dir', default=[''],  # dest='out_dir'
                            action='store',
                            # (['pimms2_' + time.strftime("%y%m%d_%H%M%S")]),
-                           help="directory to contain fastq files results")
+                           help="directory to contain result files ['pimms2_`label`_`dmy`_`HMS`']")
     # findflank.add_argument("--prefix", required=False, nargs=1, type=str, default="pimms2_condition",
     #                       help="prefix for output files")
     # findflank.add_argument("--cpus", required=False, nargs=1, type=int, default=int(os.cpu_count() / 2),
@@ -1096,7 +1096,7 @@ def parse_arguments():
     fullprocess.add_argument("--out_dir", required=False, nargs=1, metavar='out_dir', default=[''],
                              action='store',
                              # (['pimms2_' + time.strftime("%y%m%d_%H%M%S")]),
-                             help="directory to contain fastq files results [" + 'pimms2_`label`_%d%m%y_%H%M%S]')
+                             help="directory to contain result files ['pimms2_`label`_`dmy`_`HMS`']")
     fullprocess.add_argument("--cpus", required=False, nargs=1, type=int,  # default=int(6),
                              default=int(os.cpu_count() / 2),
                              help="number of processors to use [(os.cpu_count() / 2)] ")
