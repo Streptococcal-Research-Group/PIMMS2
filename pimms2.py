@@ -1010,9 +1010,9 @@ def parse_arguments():
     # findflank.add_argument("--prefix", required=False, nargs=1, type=str, default="pimms2_condition",
     #                       help="prefix for output files")
     # findflank.add_argument("--cpus", required=False, nargs=1, type=int, default=int(os.cpu_count() / 2),
-    findflank.add_argument("--cpus", required=False, nargs=1, type=int, default=int(4),
-                           # default=int(os.cpu_count() / 2),
-                           help="number of processors to use [4] ")
+    findflank.add_argument("--cpus", required=False, nargs=1, type=int,  # default=[4],
+                           default=[int(os.cpu_count() / 2)],
+                           help="number of processors to use [(os.cpu_count() / 2)] ")
     # help = "number of processors to use [(os.cpu_count() / 2)] ")
     findflank.add_argument("--max", required=True, nargs=1, type=int, default=60,
                            help="clip results to this length [illumina:60/nano:100]")
@@ -1102,10 +1102,10 @@ def parse_arguments():
                              action='store',
                              # (['pimms2_' + time.strftime("%y%m%d_%H%M%S")]),
                              help="directory to contain result files ['pimms2_`label`_`dmy`_`HMS`']")
-    fullprocess.add_argument("--cpus", required=False, nargs=1, type=int, default=int(4),
-                             # default=int(os.cpu_count() / 2),
-                             # help="number of processors to use [(os.cpu_count() / 2)] ")
-                             help="number of processors to use [4] ")
+    fullprocess.add_argument("--cpus", required=False, nargs=1, type=int,  # default=int(4),
+                             default=[int(os.cpu_count() / 2)],
+                             help="number of processors to use [(os.cpu_count() / 2)] ")
+    # help="number of processors to use [4] ")
     fullprocess.add_argument("--max", required=True, nargs=1, type=int, default=60,
                              help="clip results to this length [illumina:60/nano:100]")
     fullprocess.add_argument("--min", required=True, nargs=1, type=int, default=25,
@@ -1350,7 +1350,7 @@ def find_flank_func(parsed_args):
     # exit(0)
 
     # print(pimms_mls)
-    dir(parsed_args[0].cpus[0])
+    # dir(parsed_args[0].cpus[0])
     print('ncpus=' + str(parsed_args[0].cpus[0]))
     # sys.exit(1)
     ncpus = int(parsed_args[0].cpus[0])
