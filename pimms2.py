@@ -1,6 +1,3 @@
-# from argparse import _SubParsersAction
-# import configparser
-# import pathlib
 import datetime
 import fileinput
 import glob
@@ -13,14 +10,14 @@ import shutil
 import subprocess
 import sys
 import time
-import urllib as ul
+import urllib as ul  # for removing url style encoding from gff text notes
 from pathlib import Path
-
 import configargparse
-import gffpandas.gffpandas as gffpd
 import pandas as pd
 import pandasql as ps
-import pysam
+
+import pysam  # sequence format specific module fastq/bam/sam...
+import gffpandas.gffpandas as gffpd  # annotation format specific module gff3
 from fuzzysearch import find_near_matches
 
 pimms_mssg = """
@@ -61,6 +58,29 @@ def create_folder(directory):
             os.makedirs(directory)
     except OSError:
         print('Error: Creating directory. ' + directory)
+
+
+def make_results_dirs_in_sam_dir(samfile_path, run_label):
+    samdirname = os.path.dirname(samfile_path)
+    results_dir_db = os.path.join(samdirname, run_label + '_out_dashboard')
+    results_dir_info = os.path.join(samdirname, run_label + '_out_info')
+    # results_dir_kept = os.path.join(samdirname, run_label + '_out_kept')
+    if not os.path.exists(results_dir_db):
+        try:
+            os.makedirs(results_dir_db)
+            os.makedirs(results_dir_info)
+        except OSError:
+            print("Error while creating result dirs in {samdirname}")
+    else:
+        results_dir_db = os.path.join(samdirname, run_label + time.strftime("_%d%m%y_%H%M%S") + '_results_dashboard')
+        results_dir_info = os.path.join(samdirname, run_label + time.strftime("_%d%m%y_%H%M%S") + '_results_info')
+        try:
+            os.makedirs(results_dir_db)
+            os.makedirs(results_dir_info)
+        except OSError:
+            print("Error while creating incremented result dirs in {samdirname}")
+
+    return samdirname, results_dir_db, results_dir_info
 
 
 def delete_file_list(file_list):
@@ -143,7 +163,7 @@ def run_minimap2(flanking_fastq_concat_result, sam_output_result, genome_fasta):
     process = subprocess.Popen(
         ['minimap2', '-x', mm_mode,
          '-a',
-         '-y',  # -y adds fastq comment to sam?
+         '-y',  # -y adds fastq comment to sam
          '-o', sam_output_result,
          genome_fasta,
          flanking_fastq_concat_result,
@@ -190,14 +210,14 @@ def run_bwa(flanking_fastq_concat_result, sam_output_result, genome_fasta, ncpus
 
 def py_sam_to_bam(sam_output_result):
     bam_output_result = re.sub('.sam', '.bam', sam_output_result)
-    # add line to remove unmapped readsbased on: | samtools view -F 4 -o onlyMapped.bam ??
+    # add?? line to remove unmapped readsbased on: | samtools view -F 4 -o onlyMapped.bam ??
+    # noinspection PyUnresolvedReferences
     pysam.sort('-O' 'BAM', "-o", bam_output_result, sam_output_result)
+    # noinspection PyUnresolvedReferences
     pysam.index(bam_output_result)
     print('\nMapping stats (flagstat):\n')
+    # noinspection PyUnresolvedReferences
     for fsline in pysam.flagstat(bam_output_result).splitlines()[:5]:
-        # if re.match("paired", fsline):
-        #     break
-        # else:
         print(fsline)
 
     print('\n\n')
@@ -232,22 +252,23 @@ def pimms_fastq(fq_filename, fqout_filename, out_dir_logs):
     else:
         # fuzzy_levenshtein = False
         subs = parsed_args[0].sub[0]
-        l_dist = parsed_args[0].lev[0]  # maximum Levenshtein Distance
+        l_dist = parsed_args[0].lev[0]  # maximum Levenstein Distance
         fuzzy_levenshtein = bool(l_dist)
         insrt = parsed_args[0].insert[0]
         dels = parsed_args[0].deletion[0]
         min_length = parsed_args[0].min[0]
         max_length = parsed_args[0].max[0]
+    # print('standard settings\n')
 
-    print("\n" + fq_filename + "  ->>\n" + fqout_filename + "\n")
-    # print(fq_filename + "\n" + fqout_filename + "\n")
+    # print("\n" + fq_filename + "  ->>\n" + fqout_filename + "#####################\n")
+
     count = 0
     countq1 = 0
     countq2 = 0
     countq1q2 = 0
     countq1rc = 0
     countq2rc = 0
-    countq1rcq2rc = 0
+    # countq1rcq2rc = 0
     hit_but_short_q1_q2 = 0
     hit_q1_q2 = 0
     countq2rcq1rc = 0
@@ -269,9 +290,9 @@ def pimms_fastq(fq_filename, fqout_filename, out_dir_logs):
     # is_contam = 0
     # reject_reads_list = []
     # reject_reads_dict = dict()
-    #   with pysam.FastxFile(fq_filename) as fin, gzip.open(fqout_filename + '.gz', mode='wb') as fout:
+
     with pysam.FastxFile(fq_filename, persist=False) as fin, open(fqout_filename, mode='wt') as fout:
-        # print(fqout_filename, '==\n')
+        print(fq_filename, '  ==>\n\t\t\t', fqout_filename, '\n')
         for entry in fin:
             count += 1
 
@@ -470,30 +491,13 @@ def pimms_fastq(fq_filename, fqout_filename, out_dir_logs):
                     # reject_reads_dict.update({entry.name: 'short'})
                 continue
 
-    # reject_file = open(f'reject_list_{os.getppid()}_{multiprocessing.current_process().pid}.txt', 'w')
-    # reject_class_file = open(f'{out_dir_logs}/reject_dict_{os.getppid()}_{multiprocessing.current_process().pid}.txt',
-    #                         'w')
-    # for key, value in reject_reads_dict.items():
-    #    reject_class_file.write(f'{key}\t{value}\n')
-    # reject_class_file.write(f'%s\n' % listitem)
     # very cryptic logging needs reorganising and fixing to work with multiprocessing
     # note added random int  to get almost unique log file names need to find fix
     log_file = open(
-        f'{out_dir_logs}/log_{os.getppid()}_{multiprocessing.current_process().pid}_{random.randint(1000, 9999)}.txt',
-        'w')
+        f'{out_dir_logs}/log_{os.getppid()}_{multiprocessing.current_process().pid}_{random.randint(1000, 9999)}.txt', 'w'
+    )
 
-    # err_file = open(f'log_{os.getppid()}_{multiprocessing.current_process().pid}.err', 'w')
     try:
-        # log_file.write(f'{fq_filename}:\tcounts\n')
-        # log_file.write(f'read count:\t{count}\n')
-        # log_file.write(
-        #     f'match to both motifs (fwd|revcomp):\t{hit_q1_q2 + hit_q2rc_q1rc + hit_but_short_q1_q2 + hit_but_short_q2rc_q1rc}\n')
-        # log_file.write(f'match to multiple copies of a motif:\t{countqmulti}\n')
-        # log_file.write(f'match to mismatched motifs:\t{countqqrc}\n')
-        # log_file.write(f'match to both motifs (fwd|revcomp) >= {min_length}:\t{hit_q1_q2 + hit_q2rc_q1rc}\n')
-        # log_file.write(
-        #     f'match to single motif  >= {min_length}:\t{hit_q1_only + hit_q2_only + hit_q1rc_only + hit_q2rc_only}\n')
-        # modified logg formatting to allow concatenation by mergeLogs((
         log_file.write(
             f'fq_filename\tread count:\tmultiple copies of a motif:\tmismatched motifs:\tboth motifs (fwd|revcomp):\t'
             'both motifs (fwd|revcomp) >= {min_length}:\tsingle motif  >= {min_length}:\ttotal passed\n')
@@ -508,12 +512,10 @@ def pimms_fastq(fq_filename, fqout_filename, out_dir_logs):
         log_file.write(f'{hit_q1_only + hit_q2_only + hit_q1rc_only + hit_q2rc_only + hit_q1_q2 + hit_q2rc_q1rc}\n')
     except Exception as e:
         # Write problems to the error file
-        log_file.write(f'ERROR: problem with motif matching to {fq_filename}!\n')
+        log_file.write(f'ERROR: {e} problem with motif matching to {fq_filename}!\n')
     finally:
         # Close the files!
         log_file.close()
-        # err_file.close()
-    # print("\n" + fq_filename + "  ->>\n" + fqout_filename + "\n\n")
 
 
 # def survey_fastq(resultx_reads_list, resultx_reads_dict, fqout):
@@ -531,16 +533,18 @@ def survey_fastq(resultx_reads_list, fqout):
 ############################
 # SAM_COORDS FUNCTIONS:
 ############################
-def process_gff(gff_file, gff_feat_type, gff_extra):
+
+
+def process_gff(gff_file, gff_feat_type, gff_extra, rdir):
     annotation = gffpd.read_gff3(gff_file)
     annotation = annotation.filter_feature_of_type(gff_feat_type)
 
     gff_stem, gff_ext = os.path.splitext(os.path.basename(gff_file))
 
     if gff_feat_type[0] == "pseudogene":
-        annotation.to_gff3(gff_stem + '_pimms_features_pseudogene.gff')
+        annotation.to_gff3(os.path.join(rdir, gff_stem + '_pimms_features_pseudogene.gff'))
     else:
-        annotation.to_gff3(gff_stem + '_pimms_features.gff')
+        annotation.to_gff3(os.path.join(rdir, gff_stem + '_pimms_features.gff'))
 
     # break 9th gff column key=value pairs down to make additional columns
     attr_to_columns = annotation.attributes_to_columns()
@@ -548,9 +552,7 @@ def process_gff(gff_file, gff_feat_type, gff_extra):
     if attr_to_columns.empty:
         # return empty dataframes if no rows of required type are found print('attr_to_columns is empty!')
         return attr_to_columns, attr_to_columns
-    # attr_to_columns = attr_to_columns[attr_to_columns['type'] == gff_feat_type]  # filter to CDS
-    # attr_to_columns = attr_to_columns.filter_feature_of_type(gff_feat_type)  # filter to gff_feat_type = ['CDS', 'tRNA', 'rRNA']
-    # add feature length column and do some cleanup
+
     attr_to_columns = attr_to_columns.assign(
         feat_length=(attr_to_columns.end - attr_to_columns.start + 1)).dropna(axis=1,
                                                                               how='all').drop(columns=['attributes'])
@@ -566,8 +568,7 @@ def process_gff(gff_file, gff_feat_type, gff_extra):
     if 'product' not in attr_to_columns:
         attr_to_columns['product'] = '-'
     else:
-        attr_to_columns['product'] = attr_to_columns['product'].fillna('').astype(str).apply(
-            ul.parse.unquote)  # added fix for None datatype
+        attr_to_columns['product'] = attr_to_columns['product'].fillna('').astype(str).apply(ul.parse.unquote)  # added fix for None datatype
     # fix to skip requested extra gff annotation field if not present in GFF
     drop_gff_extra = []
     for field in gff_extra:
@@ -582,8 +583,7 @@ def process_gff(gff_file, gff_feat_type, gff_extra):
         if field == 'translation':
             continue
         else:
-            attr_to_columns[field] = attr_to_columns[field].fillna('').astype(str).apply(
-                ul.parse.unquote)  # added fix for None datatype
+            attr_to_columns[field] = attr_to_columns[field].fillna('').astype(str).apply(ul.parse.unquote)  # added fix for None datatype
 
     gff_columns_addback = attr_to_columns[['seq_id',
                                            'ID',  # additional hopefully unique feature ID
@@ -597,10 +597,6 @@ def process_gff(gff_file, gff_feat_type, gff_extra):
     # fix to remove na values and allow joining with processed data also processed with fillna to allow group_by usage
     # note .copy on previous line
     gff_columns_addback.fillna('', inplace=True)
-    # gff_columns_addback.fillna(dict.fromkeys(['seq_id',
-    #                                           'locus_tag',
-    #                                           'type',
-    #                                           'gene'], 0), inplace=True)
 
     data_top = gff_columns_addback.head()
     print(data_top)
@@ -624,14 +620,13 @@ def process_sam(sam_file, min_depth_cutoff, fraction_mismatch):
     open(sam_stem + ".bed", 'w').close()
     f = open(sam_stem + ".bed", "a")
 
-    STRAND = ["+", "-"]
+    strand = ["+", "-"]
     for read in samfile.fetch():
         if read.is_unmapped:
             continue
-        STR = STRAND[int(read.is_reverse)]
-        BED = [read.reference_name, read.pos, read.reference_end, ".", read.mapping_quality, STR,
-               '# ' + read.query_name]  # read group added
-        f.write('\t'.join([str(i) for i in BED]))
+        read_str = strand[int(read.is_reverse)]
+        read_bed = [read.reference_name, read.pos, read.reference_end, ".", read.mapping_quality, read_str, '# ' + read.query_name]  # read group added
+        f.write('\t'.join([str(i) for i in read_bed]))
         f.write('\n')
     f.close()
     print('#BED')
@@ -643,32 +638,30 @@ def process_sam(sam_file, min_depth_cutoff, fraction_mismatch):
     f2.write('\t'.join([str(i) for i in ['ref_name', 'coord', 'strand', 'read_name', 'read_grp', 'read_comment']]))
     # f2.write('\t'.join([str(i) for i in ['ref_name', 'coord', 'strand', 'read_name', 'read_grp']]))
     f2.write('\n')
-    STRAND = ["+", "-"]
+    strand = ["+", "-"]
     for read in samfile.fetch():
         if read.is_unmapped:
             continue
         # print(read.query_name + '.')
         # continue
-        NM_value = read.get_tag('NM')
+        nm_value = read.get_tag('NM')
         if fraction_mismatch:  # and NM_value > 0:
-            if (read.query_alignment_length * fraction_mismatch[0]) > NM_value:
+            if (read.query_alignment_length * fraction_mismatch[0]) > nm_value:
                 continue
-        STR = STRAND[int(read.is_reverse)]  # coverts is_reverse boolean into + or - strings
+        read_str = strand[int(read.is_reverse)]  # coverts is_reverse boolean into + or - strings
         # print(STR)
         # continue
-        if STR == '+':
-            COORDS = [read.reference_name, (read.reference_start + 4), STR, '# ' + read.query_name,
-                      ':'.join(read.query_name.split(':', 4)[:4]),
-                      read.get_tag("CO").split(":")[-1]]  # add fq comment sample id number
+        if read_str == '+':
+            read_coords = [read.reference_name, (read.reference_start + 4), read_str, '# ' + read.query_name, ':'.join(read.query_name.split(':', 4)[:4]),
+                           read.get_tag("CO").split(":")[-1]]  # add fq comment sample id number
             #          ':'.join(read.query_name.split(':', 4)[:4])]
-            f2.write('\t'.join([str(i) for i in COORDS]))
+            f2.write('\t'.join([str(i) for i in read_coords]))
             f2.write('\n')
-        if STR == '-':
-            COORDS = [read.reference_name, (read.reference_end - 4), STR, '# ' + read.query_name,
-                      ':'.join(read.query_name.split(':', 4)[:4]),
-                      read.get_tag("CO").split(":")[-1]]  # add fq comment sample id number
+        if read_str == '-':
+            read_coords = [read.reference_name, (read.reference_end - 4), read_str, '# ' + read.query_name, ':'.join(read.query_name.split(':', 4)[:4]),
+                           read.get_tag("CO").split(":")[-1]]  # add fq comment sample id number
             #          ':'.join(read.query_name.split(':', 4)[:4])]
-            f2.write('\t'.join([str(i) for i in COORDS]))
+            f2.write('\t'.join([str(i) for i in read_coords]))
             f2.write('\n')
     f2.close()
     samfile.close()
@@ -693,7 +686,7 @@ def seqid_consistancy_check(mygffcolumns, my_sam):
             '\nERROR: GFF & mapping reference sequence IDs are inconsistent. \n' +
             'SYS.EXIT: Please check and update the sequence IDs in your sequence and gff files so they match up before running again.\ngff:\n' +
             str(gff_seq_id_list) + '\nsam/bam:\n' + str(sam_seq_id_list) + '\n' +
-            'NOTE: If the sequence ID mismatch is benign e.g. an extra plasmid/contig, override by using --gff_force with sam_extract/full_process\n')
+            'NOTE: If the sequence ID mismatch is benign e.g. an extra plasmid/contig, override by using --gff_force with bam_extract/full_process\n')
 
     print(type(sam_seq_id_list))
     print(type(gff_seq_id_list))
@@ -779,7 +772,7 @@ def coordinates_to_features_reps(sam_stem, attr_to_columns, condition_label):
 
 
 def coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, condition_label, min_depth_cutoff,
-                            gff_extra):
+                            gff_extra, db_rdir):
     coord_df = pd.read_csv(sam_stem + "_insert_coords.txt", sep='\t', dtype={'ref_name': "str", 'coord': "int64"})
     coord_counts_df = coord_df.groupby(['ref_name', 'coord']).size().reset_index(name='counts')
     # print(coord_counts_df.head())
@@ -806,7 +799,7 @@ def coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, cond
     coord_counts_df_pimms2_gff = coord_counts_df_pimms2_gff[
         ['ref_name', 'source', 'feature_type', 'start', 'stop', 'score', 'strand', 'phase', 'info']]
     print(coord_counts_df_pimms2_gff.head())
-    coord_counts_df_pimms2_gff.to_csv(condition_label + "_pimms_insert_coordinates" + ".gff", index=False, sep='\t',
+    coord_counts_df_pimms2_gff.to_csv(os.path.join(db_rdir, condition_label + "_pimms_insert_coordinates" + ".gff"), index=False, sep='\t',
                                       header=False)
 
     # added .loc to fix warning
@@ -944,41 +937,32 @@ def parse_arguments():
         epilog="\n\n*** N.B. This is a development version ***\n \n ",
         description='''description here'''
     )
-    ap.add_argument('-v', '--version', action='version', version='%(prog)s 2.0.5 demo')
-    # ap.add_argument('--nano', action='store_true', required=False,
-    #                help='global setting to change processing to nanopore data [False: illumina processing]')
+    ap.add_argument('-v', '--version', action='version', version='%(prog)s 2.0.7 demo')
 
     modes = ap.add_subparsers(parser_class=configargparse.ArgParser, dest='command')
 
-    # modes.required = False
     findflank = modes.add_parser("find_flank", add_config_file_help=False,
                                  help="Mode: find read regions flanking the IS sequence by mapping them to the target genome",
-                                 description="Args that start with '--' (eg. --sam) can also be set in a config file (specified via -c)")
-    samcoords = modes.add_parser("sam_extract", add_config_file_help=False,
+                                 description="Args that start with '--' (eg. --bam) can also be set in a config file (specified via -c)")
+    samcoords = modes.add_parser("bam_extract", add_config_file_help=False,
                                  help="Mode: extract insertion site coordinates from sam file",
-                                 description="Args that start with '--' (eg. --sam) can also be set in a config file (specified via -c)")
+                                 description="Args that start with '--' (eg. --bam) can also be set in a config file (specified via -c)")
 
     tablemerge = modes.add_parser("table_merge", add_config_file_help=False,
                                   help='Mode: merge two compatible PIMMS results tables '
                                        '(N.B: this step does a simple table join and does not check the data)').add_mutually_exclusive_group()
 
     fullprocess = modes.add_parser("full_process", add_config_file_help=False,
-                                   help="Mode: find_flank + sam_extract",
-                                   description="Args that start with '--' (eg. --sam) can also be set in a config file (specified via -c)")
-
-    otherstuff = modes.add_parser("other_stuff", help='Mode: do other good PIMMS related stuff')
-    # Add the arguments to the parser
+                                   help="Mode: find_flank + bam_extract",
+                                   description="Args that start with '--' (eg. --bam) can also be set in a config file (specified via -c)")
 
     # FIND_FLANK args
-    # to fix: nargs='?' deal with mistaken use of nargs=1 whic give a single element list
+    # to fix: nargs='?' deal with mistaken use of nargs=1 which give a single element list
     findflank.add_argument("-c", "--config", required=False, is_config_file=True,  # dest='config_file',
-                           # type=str, default='',
                            metavar='pimms2.config',
                            help="use parameters from config file")
     findflank.add_argument("--nano", required=False, action='store_true', default=False,
                            help="override with settings more suitable for nanopore")
-    # findflank.add_argument("--cas9", required=False, action='store_true', default=False,
-    #                        help="override with motif matching method settings for nanopore cas9")
     findflank.add_argument("--fasta", required=False, nargs=1, metavar='ref_genome.fasta', type=extant_file,
                            help="fasta file for reference genome ")
     findflank.add_argument("--nomap", required=False, action='store_true', default=False,
@@ -988,9 +972,7 @@ def parse_arguments():
     # findflank.add_argument("--rmfiles", required=False, action='store_true', default=False,
     #                       help="remove intermediate files")
     findflank.add_argument("--keep", required=False, action='store_true', default=False,
-                           help="keep intermediate files for diagnostic purposes")
-    # findflank.add_argument("--lev", required=False, action='store_true', default=False,
-    #                       help="use Levenshtein distance of 1")
+                           help="keep intermediate fastq files etc for diagnostic purposes")
     findflank.add_argument("--lev", required=False, nargs=1, type=int, default=0,
                            help="use Levenshtein distance (combined insert|del|sub score)")
     findflank.add_argument("--sub", required=False, nargs=1, type=int, default=1,
@@ -1003,17 +985,12 @@ def parse_arguments():
                            help="directory containing input fastq files (assumed to match '*q.gz' or '*.fastq')")
     findflank.add_argument("--fwdrev", required=False, nargs=1, type=str, default=['_R1_,_R2_'],
                            help="text substring to uniquely identify illumina fwd/rev paired fastq files ['_R1_,_R2_']")
-    findflank.add_argument("--out_dir", required=False, nargs=1, metavar='out_dir', default=[''],  # dest='out_dir'
+    findflank.add_argument("--out_dir", required=False, nargs=1, metavar='out_dir', default=[''],
                            action='store',
-                           # (['pimms2_' + time.strftime("%y%m%d_%H%M%S")]),
                            help="directory to contain result files ['pimms2_`label`_`dmy`_`HMS`']")
-    # findflank.add_argument("--prefix", required=False, nargs=1, type=str, default="pimms2_condition",
-    #                       help="prefix for output files")
-    # findflank.add_argument("--cpus", required=False, nargs=1, type=int, default=int(os.cpu_count() / 2),
     findflank.add_argument("--cpus", required=False, nargs=1, type=int,  # default=[4],
                            default=[int(os.cpu_count() / 2)],
                            help="number of processors to use [(os.cpu_count() / 2)] ")
-    # help = "number of processors to use [(os.cpu_count() / 2)] ")
     findflank.add_argument("--max", required=True, nargs=1, type=int, default=60,
                            help="clip results to this length [illumina:60/nano:100]")
     findflank.add_argument("--min", required=True, nargs=1, type=int, default=25,
@@ -1024,29 +1001,22 @@ def parse_arguments():
     findflank.add_argument("--motif2", required=False, nargs=1, type=str, default=['GGTTCTGTTGCAAAGTTTAAAAA'],
                            # revcomp: TTTTTAAACTTTGCAACAGAACC
                            help="IS end reference motif2 [GGTTCTGTTGCAAAGTTTAAAAA](pGh9)")
-    findflank.add_argument("--label", required=False, nargs=1, metavar='condition_name', default=[''],
+    findflank.add_argument("--label", required=True, nargs=1, metavar='condition_name', default=[''],
                            help="identifying text tag to add to results file")
 
-    # fullprocess = modes.add_parser("full_process", add_config_file_help=False,
-    #                              help="Mode: find_flank + sam_extract",
-    #                              description="Args that start with '--' (eg. --sam) can also be set in a config file (specified via -c)")
-
-    # fullprocess = findflank
-
     # SAM EXTRACT args
-    samcoords.add_argument("-c", "--config", required=False, is_config_file=True,  # dest='config_file',
-                           # type=str, default='',
+    samcoords.add_argument("-c", "--config", required=False, is_config_file=True,
                            metavar='pimms2.config',
                            help="use parameters from config file")
-    samcoords.add_argument("--sam", required=True, nargs=1, metavar='pimms.sam/bam', type=extant_file,
-                           help="sam/bam file of mapped IS flanking sequences ")
+    samcoords.add_argument("--bam", required=True, nargs=1, metavar='pimms.bam/sam', type=extant_file,
+                           help="bam/sam file of mapped IS flanking sequences ")
     samcoords.add_argument("--nano", required=False, action='store_true', default=False,
                            help="override with settings more suitable for nanopore")
-    samcoords.add_argument("--label", required=False, nargs=1, metavar='condition_name', default=[''],
+    samcoords.add_argument("--label", required=True, nargs=1, metavar='condition_name', default=[''],
                            help="text tag to add to results file")
     samcoords.add_argument("--mismatch", required=False, nargs=1, type=float, metavar='float', default=[None],
-                           choices=[Range(0.0, 0.2)],
-                           help="fraction of permitted mismatches in mapped read ( 0 <= float < 0.2 [no filter]")
+                           choices=[round(x * 0.01, 2) for x in range(0, 21)],
+                           help="fraction of permitted mismatches in mapped read ( 0 <= mismatch < 0.2) [no filter]")
     samcoords.add_argument("--min_depth", required=False, nargs=1, type=int, default=2, metavar='int',
                            help="minimum read depth at insertion site >= int [2]")
     samcoords.add_argument("--noreps", required=False, action='store_true', default=False,
@@ -1057,19 +1027,16 @@ def parse_arguments():
                            help="comma separated list of extra fields to include from the GFF3 annotation\ne.g. 'ID,translation,note' ")
     samcoords.add_argument("--gff_force", required=False, action='store_true', default=False,
                            help="override GFF/BAM seq id discrepancies e.g. use when the gff has a plasmid not present in the reference sequence or vice-versa")
-    samcoords.add_argument("--out_fmt", required=False, nargs=1, type=str, default='xlxs',
-                           choices=['xlxs', 'tsv', 'csv'],
+    samcoords.add_argument("--out_fmt", required=False, nargs=1, type=str, default=['xlsx'],
+                           choices=['xlsx', 'tsv', 'csv'],
                            help="set results table file format tab/comma separated or Excel (tsv|csv|xlsx) [xlsx]")
 
     # TABLE_MERGE args
     tablemerge.add_argument("--xlsx", required=False, nargs=2, type=extant_file,
-                            # action='store_true', default=False,
-                            help="2x .xlxs Excel files")
+                            help="2x .xlsx Excel files")
     tablemerge.add_argument("--csv", required=False, nargs=2, type=extant_file,
-                            # action='store_true', default=False,
                             help="2x .csv comma separated text/table files")
     tablemerge.add_argument("--tsv", required=False, nargs=2, type=extant_file,
-                            # action='store_true', default=False,
                             help='2x .tsv tab (\\t) separated text/table files')
 
     # FULL_PROCESS ##########################
@@ -1100,12 +1067,10 @@ def parse_arguments():
                              help="text substring to uniquely identify illumina fwd/rev paired fastq files ['_R1_,_R2_']")
     fullprocess.add_argument("--out_dir", required=False, nargs=1, metavar='out_dir', default=[''],
                              action='store',
-                             # (['pimms2_' + time.strftime("%y%m%d_%H%M%S")]),
                              help="directory to contain result files ['pimms2_`label`_`dmy`_`HMS`']")
     fullprocess.add_argument("--cpus", required=False, nargs=1, type=int,  # default=int(4),
                              default=[int(os.cpu_count() / 2)],
                              help="number of processors to use [(os.cpu_count() / 2)] ")
-    # help="number of processors to use [4] ")
     fullprocess.add_argument("--max", required=True, nargs=1, type=int, default=60,
                              help="clip results to this length [illumina:60/nano:100]")
     fullprocess.add_argument("--min", required=True, nargs=1, type=int, default=25,
@@ -1116,9 +1081,9 @@ def parse_arguments():
     fullprocess.add_argument("--motif2", required=False, nargs=1, type=str, default=['GGTTCTGTTGCAAAGTTTAAAAA'],
                              # revcomp: TTTTTAAACTTTGCAACAGAACC
                              help="IS end reference motif2 [GGTTCTGTTGCAAAGTTTAAAAA](pGh9)")
-    fullprocess.add_argument("--label", required=False, nargs=1, metavar='condition_name', default=[''],
+    fullprocess.add_argument("--label", required=True, nargs=1, metavar='condition_name', default=[''],
                              help="identifying text tag to add to results file")
-    fullprocess.add_argument("--sam", required=False, nargs=1, metavar='pimms.sam/bam',  # type=extant_file,
+    fullprocess.add_argument("--bam", required=False, nargs=1, metavar='pimms.bam/sam',  # type=extant_file,
                              type=str, default=['bam?'],
                              help=configargparse.SUPPRESS)
     # samcoords.add_argument("--nano", required=False, action='store_true', default=False,
@@ -1126,8 +1091,8 @@ def parse_arguments():
     # samcoords.add_argument("--label", required=False, nargs=1, metavar='condition_name', default=[''],
     #                       help="text tag to add to results file")
     fullprocess.add_argument("--mismatch", required=False, nargs=1, type=float, metavar='float', default=[None],
-                             choices=[Range(0.0, 0.2)],
-                             help="fraction of permitted mismatches in mapped read ( 0 <= float < 0.2 [no filter]")
+                             choices=[round(x * 0.01, 2) for x in range(0, 21)],
+                             help="fraction of permitted mismatches in mapped read ( 0 <= mismatch < 0.2) [no filter]")
     fullprocess.add_argument("--min_depth", required=False, nargs=1, type=int, default=2, metavar='int',
                              help="minimum read depth at insertion site >= int [2]")
     fullprocess.add_argument("--noreps", required=False, action='store_true', default=False,
@@ -1139,43 +1104,32 @@ def parse_arguments():
     fullprocess.add_argument("--gff_force", required=False, action='store_true', default=False,
                              help="override GFF/BAM seq id discrepancies "
                                   "e.g. use when the gff has a plasmid not present in the reference sequence or vice-versa")
-    fullprocess.add_argument("--out_fmt", required=False, nargs=1, type=str, default='xlxs',
-                             choices=['xlxs', 'tsv', 'csv'],
+    fullprocess.add_argument("--out_fmt", required=False, nargs=1, type=str, default=['xlsx'],
+                             choices=['xlsx', 'tsv', 'csv'],
                              help="set results table file format tab/comma separated or Excel (tsv|csv|xlsx) [xlsx]")
 
-    #############################
-    # for option in fullprocess._optionals._actions:
-    #   print(option._actions)
-    # print(fullprocess.format_help())
-    # args = ap.parse_args()
-    # options = vars(args)
-    # print(options)
-    # print("All settings used:")
-    # for k, v in sorted(vars(args).items()):
-    #     print("{0}: {1}".format(k, v))
-    # sys.exit(1)
-
-    parsed_args = ap.parse_known_args()
-    print(parsed_args)
-    if parsed_args[0].command == 'other_stuff':
-        print("\nThis is a place holder for adding more functionality to PIMMS2.\n" +
-              "Please contact the developers if you have requests for expanding PIMMS2 capabilities.\n\n")
+    local_parsed_args = ap.parse_known_args()
+    print("-----------------")
+    print(local_parsed_args)
+    print("-----------------")
+    print(ap.format_values())
+    print("-----------------")
 
     # exit and print short help message if no mode/arguments supplied
     if len(sys.argv) <= 2:
         ap.print_usage()
         sys.exit(1)
 
-    if parsed_args[0].command == 'find_flank':
-        if not parsed_args[0].nomap:
-            prog_in_path_check(parsed_args[0].mapper)
+    if local_parsed_args[0].command == 'find_flank':
+        if not local_parsed_args[0].nomap:
+            prog_in_path_check(local_parsed_args[0].mapper)
             # prog_in_path_check('bwa')
-            if parsed_args[0].fasta is None:
+            if local_parsed_args[0].fasta is None:
                 ap.error("unless the --nomap flag is used please supply a sequence file e.g:  --fasta contigs.fasta")
-            elif not parsed_args[0].label:
+            elif not local_parsed_args[0].label:
                 ap.error("unless the --nomap flag is used please supply a text label string  --label cond_01")
             else:
-                print("refseq provided: " + parsed_args[0].fasta[0])
+                print("refseq provided: " + local_parsed_args[0].fasta[0])
 
     # print("##########")
     # print(ap.format_values())  # useful for logging where different settings came from
@@ -1186,50 +1140,43 @@ def parse_arguments():
     # print(ap.)
     # sys.exit(1)
 
-    return parsed_args
+    return local_parsed_args
 
 
-# elif parsed_args[0].command == 'sam_extract':
-def sam_extract_func(parsed_args):
-    print(pimms_mssg + parsed_args[0].command + pimms_mssg2)
+# elif parsed_args[0].command == 'bam_extract':
+def bam_extract_func(parsed_args_be):
+    print(pimms_mssg + parsed_args_be[0].command + pimms_mssg2)
 
-    if parsed_args[0].nano:
-        parsed_args[0].noreps = True
+    if parsed_args_be[0].nano:
+        parsed_args_be[0].noreps = True
     # sort out extra requested gff annotation fields
-    if parsed_args[0].gff_extra:
+    if parsed_args_be[0].gff_extra:
         # strip any formatting quotes and turn comma separated string into a list of fields
-        gff_extra = parsed_args[0].gff_extra[0].strip("'\"").split(',')
+        gff_extra = parsed_args_be[0].gff_extra[0].strip("'\"").split(',')
     else:
         gff_extra = []
 
-    print("extra gff fields: " + str(gff_extra))
-    gff_file = parsed_args[0].gff[0]
-    gff_feat_type = ['CDS', 'tRNA', 'rRNA']
     # process the gff file to get required fields
-    gff_columns_addback, attr_to_columns = process_gff(gff_file, gff_feat_type, gff_extra)
-    # trap multiple return values from function
-    # gff_file = '/Users/svzaw/Data/PIMMS_redo/PIMMS2_stuff/PIMMS_V1/S.uberis_0140J.gff3'
-    # gff_file = 'UK15_assembly_fix03.gff'
-    gff_columns_addback_pseudo, attr_to_columns_pseudo = process_gff(gff_file, ['pseudogene'], [])
+    print("extra gff fields: " + str(gff_extra))
+    gff_file = parsed_args_be[0].gff[0]
+    gff_feat_type = ['CDS', 'tRNA', 'rRNA']
 
-    # print(gff_columns_addback_pseudo)
-    # print(attr_to_columns_pseudo)
+    min_depth_cutoff = parsed_args_be[0].min_depth[0]
+    fraction_mismatch = parsed_args_be[0].mismatch[0]
+    sam_file = parsed_args_be[0].bam[0]
+    condition_label = parsed_args_be[0].label[0]
+    print("\ncond label " + condition_label + "\n")
 
-    # exit()
-    # set up various variables and commandline parameters
-    use_fraction_mismatch = True
-    min_depth_cutoff = parsed_args[0].min_depth[0]
-    # permitted_mismatch = 6
-    fraction_mismatch = parsed_args[0].mismatch[0]
-    sam_file = parsed_args[0].sam[0]
-    condition_label = parsed_args[0].label[0]
-
-    # sam_stem, sam_ext = os.path.splitext(os.path.basename(sam_file))
-    # sam_stem = sam_stem + '_md' + str(min_depth_cutoff) + '_mm' + str(fraction_mismatch or '')
-
-    # check all sequence names match up
-    seqid_consistancy_check(gff_columns_addback, sam_file)
     # process pimms sam/bam  file and produce coordinate / bed files
+
+    sam_dir, db_rdir, info_rdir = make_results_dirs_in_sam_dir(sam_file, condition_label)
+
+    # process the gff file to get required fields
+    gff_columns_addback, attr_to_columns = process_gff(gff_file, gff_feat_type, gff_extra, info_rdir)
+
+    gff_columns_addback_pseudo, attr_to_columns_pseudo = process_gff(gff_file, ['pseudogene'], [], info_rdir)
+
+    seqid_consistancy_check(gff_columns_addback, sam_file)
     process_sam(sam_file, min_depth_cutoff, fraction_mismatch)
 
     sam_stem = modify_sam_stem(sam_file, min_depth_cutoff, fraction_mismatch)
@@ -1237,16 +1184,17 @@ def sam_extract_func(parsed_args):
     # allocate insertions to features and create results merged with GFF
     # possibly poor coding to merge with gff here
     pimms_result_table_full = coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, condition_label,
-                                                      min_depth_cutoff, gff_extra)
+                                                      min_depth_cutoff, gff_extra, db_rdir)
     # if parsed_args[0].nano:
     #    print("--noreps forced for nanopore data\n")
-    if not parsed_args[0].noreps:
+    if not parsed_args_be[0].noreps:
         print("processing read groups as replicates for illumina data\n")
         mp_reps_feature_counts = coordinates_to_features_reps(sam_stem, attr_to_columns, condition_label)
         if not mp_reps_feature_counts.empty:
             merged_with_reps = pimms_result_table_full.merge(mp_reps_feature_counts, on=["seq_id", "start", "end"],
-                                                             how='inner')
-            pimms_result_table_full = merged_with_reps
+                                                             how='outer')
+            # how='inner')
+            pimms_result_table_full = merged_with_reps.fillna(0)
     else:
         print("not processing read groups as replicates\n")
 
@@ -1255,10 +1203,11 @@ def sam_extract_func(parsed_args):
         pimms_result_table_full.loc[pimms_result_table_full.locus_tag.isin(tag_psueudogenes), "type"] = \
             pimms_result_table_full['type'] + '_pseudo'
 
+    # print(parsed_args_be[0].out_fmt[0] + "out_fmt\n")
     # write results as text/excel
-    if parsed_args[0].out_fmt[0] == 'tsv':
+    if parsed_args_be[0].out_fmt[0] == 'tsv':
         pimms_result_table_full.to_csv(sam_stem + "_countinfo.tsv", index=False, sep='\t')
-    elif parsed_args[0].out_fmt[0] == 'csv':
+    elif parsed_args_be[0].out_fmt[0] == 'csv':
         pimms_result_table_full.to_csv(sam_stem + "_countinfo.csv", index=False, sep=',')
     else:
         writer = pd.ExcelWriter(sam_stem + '_countinfo.xlsx', engine='xlsxwriter')
@@ -1267,32 +1216,37 @@ def sam_extract_func(parsed_args):
         # Close the Pandas Excel writer and output the Excel file.
         writer.save()
 
+    os.rename(sam_stem + "_countinfo." + parsed_args_be[0].out_fmt[0], os.path.join(db_rdir, sam_stem + "_countinfo." + parsed_args_be[0].out_fmt[0]))
+    os.rename(sam_stem + "_insert_coords.txt", os.path.join(info_rdir, sam_stem + "_insert_coords.txt"))
+    os.rename(sam_stem + ".bed", os.path.join(info_rdir, sam_stem + ".bed"))
 
-# end sam_extract_func
 
-def table_merge_func(parsed_args):
-    print(pimms_mssg + parsed_args[0].command + pimms_mssg2)
-    if parsed_args[0].xlsx:
-        print("Join: ", parsed_args[0].xlsx[0], "\t", parsed_args[0].xlsx[1], "\n")
+# end bam_extract_func
+
+
+def table_merge_func(parsed_args_tm):
+    print(pimms_mssg + parsed_args_tm[0].command + pimms_mssg2)
+    if parsed_args_tm[0].xlsx:
+        print("Join: ", parsed_args_tm[0].xlsx[0], "\t", parsed_args_tm[0].xlsx[1], "\n")
         # requires openpyxl dependancy installed
-        result_df1 = pd.read_excel(parsed_args[0].xlsx[0], engine="openpyxl")
-        result_df2 = pd.read_excel(parsed_args[0].xlsx[1], engine="openpyxl")
+        result_df1 = pd.read_excel(parsed_args_tm[0].xlsx[0], engine="openpyxl")
+        result_df2 = pd.read_excel(parsed_args_tm[0].xlsx[1], engine="openpyxl")
         results_merged = pd.DataFrame.merge(result_df1, result_df2)
         writer = pd.ExcelWriter('merged_result.xlsx', engine='xlsxwriter')
         # Convert the dataframe to an XlsxWriter Excel object.
         results_merged.to_excel(writer, sheet_name='PIMMS2_merged_result', index=False)
         # Close the Pandas Excel writer and output the Excel file.
         writer.save()
-    elif parsed_args[0].csv:
-        print("Join: ", parsed_args[0].csv[0], "\t", parsed_args[0].csv[1], "\n")
-        result_df1 = pd.read_csv(parsed_args[0].csv[0]).replace('"', '', regex=True)
-        result_df2 = pd.read_csv(parsed_args[0].csv[1]).replace('"', '', regex=True)
+    elif parsed_args_tm[0].csv:
+        print("Join: ", parsed_args_tm[0].csv[0], "\t", parsed_args_tm[0].csv[1], "\n")
+        result_df1 = pd.read_csv(parsed_args_tm[0].csv[0]).replace('"', '', regex=True)
+        result_df2 = pd.read_csv(parsed_args_tm[0].csv[1]).replace('"', '', regex=True)
         results_merged = pd.DataFrame.merge(result_df1, result_df2)
         results_merged.to_csv('merged_result.csv', index=False)
-    elif parsed_args[0].tsv:
-        print("Join: ", parsed_args[0].tsv[0], "\t", parsed_args[0].tsv[1], "\n")
-        result_df1 = pd.read_csv(parsed_args[0].tsv[0], sep="\t")
-        result_df2 = pd.read_csv(parsed_args[0].tsv[1], sep="\t")
+    elif parsed_args_tm[0].tsv:
+        print("Join: ", parsed_args_tm[0].tsv[0], "\t", parsed_args_tm[0].tsv[1], "\n")
+        result_df1 = pd.read_csv(parsed_args_tm[0].tsv[0], sep="\t")
+        result_df2 = pd.read_csv(parsed_args_tm[0].tsv[1], sep="\t")
         results_merged = pd.DataFrame.merge(result_df1, result_df2)
         results_merged.to_csv('merged_result.txt', index=False, sep="\t")
     else:
@@ -1303,88 +1257,73 @@ parsed_args = parse_arguments()  # parse command line arguments
 
 
 # FIND_FLANK ###
-def find_flank_func(parsed_args):
+def find_flank_func(parsed_args_ff):
     # if parsed_args[0].command == 'find_flank':
-    print(pimms_mssg + parsed_args[0].command + pimms_mssg2)
+    print(pimms_mssg + parsed_args_ff[0].command + pimms_mssg2)
     # print((vars(parsed_args)))
     # sys.exit(1)
     # config_file = parsed_args.config_file[0]
 
     # construct config parser
     # p2config = configparser.ConfigParser()
-    mapper = parsed_args[0].mapper
-    label = parsed_args[0].label[0]
-    # if not parsed_args[0].nomap:
-    #     prog_in_path_check(mapper)
-    #     # prog_in_path_check('bwa')
-    #     if parsed_args[0].fasta is None:
-    #         ap.error("unless the --nomap flag is used please supply a sequence file e.g:  --fasta contigs.fasta")
-    #     elif not label:
-    #         ap.error("unless the --nomap flag is used please supply a text label string  --label cond_01")
-    #     else:
-    #         print("refseq provided: " + parsed_args[0].fasta[0])
-    #
-    #
-    # else:
-    #     print('Skipping sequence mapping ')
+    mapper = parsed_args_ff[0].mapper
+    label = parsed_args_ff[0].label[0]
+    print("\nFF label" + label + "\n")
 
-    if parsed_args[0].out_dir[0]:
-        out_dir = parsed_args[0].out_dir[0]
+    if parsed_args_ff[0].out_dir[0]:
+        out_dir_ff = parsed_args_ff[0].out_dir[0]
     # print('\ncreating result dir: ' + out_dir + '\n')
     else:
-        out_dir = 'pimms2_' + label + '_' + time.strftime("%d%m%y_%H%M%S")
+        out_dir_ff = 'pimms2_' + label + '_' + time.strftime("%d%m%y_%H%M%S")
     # print('\ncreating result dir: ' + out_dir + '\n')
     # createFolder(out_dir)
 
-    if os.path.isdir(out_dir):
+    if os.path.isdir(out_dir_ff):
         print('\nresult dir exists\n')
     else:
-        print('\ncreating result dir: ' + out_dir + '\n')
-        create_folder(out_dir)
+        print('\ncreating result dir: ' + out_dir_ff + '\n')
+        create_folder(out_dir_ff)
 
-    out_dir_logs = os.path.join(out_dir, 'logs')
+    out_dir_logs = os.path.join(out_dir_ff, 'logs')
     create_folder(out_dir_logs)
 
-    fwdrev_wc = parsed_args[0].fwdrev[0].strip("'\"").split(',')
+    fwdrev_wc = parsed_args_ff[0].fwdrev[0].strip("'\"").split(',')
 
     # exit(0)
 
     # print(pimms_mls)
     # dir(parsed_args[0].cpus[0])
-    print('ncpus=' + str(parsed_args[0].cpus[0]))
+    print('ncpus=' + str(parsed_args_ff[0].cpus[0]))
     # sys.exit(1)
-    ncpus = int(parsed_args[0].cpus[0])
+    ncpus = int(parsed_args_ff[0].cpus[0])
 
-    # ncpus = int(1)
-    nano = parsed_args[0].nano
-    # cas9 = parsed_args[0].cas9
+    nano = parsed_args_ff[0].nano
+
     # experimental decontaminate transposon/vector sequence
     # not currently effective try another implementation when time allows?
-    decontam_tranposon = False
-    fuzzy_levenshtein = bool(parsed_args[0].lev[0])
+    # decontam_tranposon = False
+    fuzzy_levenshtein = bool(parsed_args_ff[0].lev[0])
 
     # set up some variables:
     if nano:  # nano == True
         # parsed_args[0].noreps = True
         fuzzy_levenshtein = True
-        l_dist = parsed_args[0].lev  # maximum Levenshtein Distance
+        l_dist = parsed_args_ff[0].lev  # maximum Levenshtein Distance
         min_length = 50
         max_length = 200
         print('overriding with Nanopore appropriate settings: Levenshtein distance of ' + str(
             l_dist) + ' + sequence length min = ' + str(min_length) + ', max = ' + str(max_length))
     else:
-        subs = parsed_args[0].sub[0]
-        l_dist = parsed_args[0].lev[0]  # maximum Levenshtein Distance
-        insrt = parsed_args[0].insert[0]
-        dels = parsed_args[0].deletion[0]
-        min_length = parsed_args[0].min[0]
-        max_length = parsed_args[0].max[0]
+        subs = parsed_args_ff[0].sub[0]
+        l_dist = parsed_args_ff[0].lev[0]  # maximum Levenshtein Distance
+        insrt = parsed_args_ff[0].insert[0]
+        dels = parsed_args_ff[0].deletion[0]
+        min_length = parsed_args_ff[0].min[0]
+        max_length = parsed_args_ff[0].max[0]
 
     # set up some names
     if nano:
         seqtype = '_nano'
-    # elif cas9:
-    #    seqtype = '_cas9'
     else:
         seqtype = ''
 
@@ -1392,111 +1331,46 @@ def find_flank_func(parsed_args):
         fq_result_suffix = (seqtype + "_pimms2out_trim" + str(max_length) + "_lev" + str(l_dist) + ".fastq")
     elif insrt > 0 | dels > 0:
         fq_result_suffix = (
-                seqtype + "_pimms2out_trim" + str(max_length) + "_sub" + str(subs) + "_ins" +
-                str(insrt) + "_del" + str(dels) + ".fastq")
+                seqtype + "_pimms2out_trim" + str(max_length) + "_sub" + str(subs) + "_ins" + str(insrt) + "_del" + str(dels) + ".fastq")
     else:
         fq_result_suffix = (seqtype + "_pimms2out_trim" + str(max_length) + "_sub" + str(subs) + ".fastq")
 
     sam_result_suffix = re.sub('.fastq', '.sam', fq_result_suffix)
 
-    # q1_contam = 'CTCTCCATCAAGCTATCGAATTCCTGCAGC'
-    # q1_contam = 'ATCCACTAGTTCTAGAGCGG'
-
-    # hack to reducew contamination by vector
-    # q1_contam1 = 'TTCTCTCCATCAAGCTATCGAATTCCTGCAGCC'
-    # q1_contam2 = 'GGGGGATCCACTAGTTCTA'
-    #
-    # q1rc_contam1 = 'TTCTCTCCATCAAGCTATCGAATTCCTGCAGCC'.translate(trans)[::-1]
-    # q1rc_contam2 = 'GGGGGATCCACTAGTTCTA'.translate(trans)[::-1]
-    #
-    # q2_contam1 = 'CGGTATCGATAAGCTTGATAATTCG'
-    # q2_contam2 = 'CCAGTCACGACGTTGTAAA'
-    #
-    # q2rc_contam1 = 'CGGTATCGATAAGCTTGATAATTCG'.translate(trans)[::-1]
-    # q2rc_contam2 = 'CCAGTCACGACGTTGTAAA'.translate(trans)[::-1]
-    # contam1 = 'GATGCTCTAGAGCATTCTCT'
-    # contam2 = 'CATTCTCTCCATCAAGCTAT'
-    # contam1rc = contam1.translate(trans)[::-1]  # reverse complement ([::-1] -> reverse)
-    # contam2rc = contam2.translate(trans)[::-1]
-
-    # qry1 = "TCAGAAAACTTTGCAACAGAACC"
-    # qry2 = "GGTTCTGTTGCAAAGTTTAAAAA"
-
-    # trans = str.maketrans('ATGCN', 'TACGN')  # complement DNA lookup
-    # qry1 = parsed_args[0].motif1[0].strip("'\"")
-    # qry2 = parsed_args[0].motif2[0].strip("'\"")
-    # print(str(qry1))
-    # print(str(qry2))
-    #
-    # # revcomp using maketrans lookup and a string reverse
-    # qry1rc = qry1.translate(trans)[::-1]  # reverse complement transposon motif1 ([::-1] -> reverse)
-    # qry2rc = qry2.translate(trans)[::-1]  # reverse complement transposon motif2
-    # print(str(qry1rc))
-    # print(str(qry2rc))
-    max_length_index = max_length - 1
-
-    fastq_dir = os.path.join(parsed_args[0].in_dir[0], '')
-
-    #
+    fastq_dir = os.path.join(parsed_args_ff[0].in_dir[0], '')
 
     flanking_fastq_result_list = []
     if nano:  # nano == True
+        print("nanopore PIMMS filtering starting...\n")
         print(datetime.datetime.now())
-        pn = multiprocessing.Pool(ncpus)
+
         pi = multiprocessing.Pool(ncpus)
         for fq in glob.glob(fastq_dir + "*q.gz"):
-            fq_processed = os.path.join(out_dir, Path(Path(fq).stem).stem + fq_result_suffix)
+            fq_processed = os.path.join(out_dir_ff, Path(Path(fq).stem).stem + fq_result_suffix)
             flanking_fastq_result_list = flanking_fastq_result_list + [fq_processed]
             pi.apply_async(pimms_fastq,
                            args=(fq, fq_processed)
-                           # os.path.join(out_dir, Path(Path(fq).stem).stem + fq_result_suffix)  # rmove double suffix
-                           # os.path.join(out_dir,
-                           #             os.path.splitext(os.path.splitext(os.path.basename(fq))[0])[
-                           #                 0] + fq_result_suffix
-                           # )  # output illumina fastq output filepath
-                           # (os.path.splitext(os.path.splitext(fq)[0])[0] + fq_result_suffix)))
                            )
-            # )
 
         pi.close()
         pi.join()
 
-        pn = multiprocessing.Pool(ncpus)
         pi = multiprocessing.Pool(ncpus)
         for fq in glob.glob(fastq_dir + "*.fastq"):
-            fq_processed = os.path.join(out_dir, Path(Path(fq).stem).stem + fq_result_suffix)
+            fq_processed = os.path.join(out_dir_ff, Path(Path(fq).stem).stem + fq_result_suffix)
             flanking_fastq_result_list = flanking_fastq_result_list + [fq_processed]
             pi.apply_async(pimms_fastq,
                            args=(fq, fq_processed)
-                           # os.path.join(out_dir, Path(Path(fq).stem).stem + fq_result_suffix)  # rmove double suffix
-                           # os.path.join(out_dir,
-                           #             os.path.splitext(os.path.splitext(os.path.basename(fq))[0])[
-                           #                 0] + fq_result_suffix
-                           # )  # output illumina fastq output filepath
-                           # (os.path.splitext(os.path.splitext(fq)[0])[0] + fq_result_suffix)))
                            )
-            # )
 
         pi.close()
         pi.join()
 
-        # for fq in glob.glob(fastq_dir + "*q.gz") + glob.glob(fastq_dir + "*.fastq"):
-        #     pn.apply_async(pimms_fastq,
-        #                    args=(fq,  # input nanopore fastq filepath
-        #                          os.path.join(out_dir,
-        #                                       os.path.splitext(os.path.splitext(os.path.basename(fq))[0])[
-        #                                           0] + fq_result_suffix
-        #                                       )  # output nanopore fastq output filepath
-        #                          )
-        #                    #   (os.path.splitext(os.path.splitext(fq)[0])[0] + fq_result_suffix))
-        #                    )
-        #
-        # pn.close()
-        # pn.join()
         print("nanopore PIMMS filtering completed...\n")
         print(datetime.datetime.now())
 
     else:  # nano == False
+        print("PIMMS read filtering starting...\n")
         print(datetime.datetime.now())
         pi = multiprocessing.Pool(ncpus)
         for fq in glob.glob(fastq_dir + "*.fastq"):
@@ -1505,16 +1379,11 @@ def find_flank_func(parsed_args):
                     1] + " NOT FOUND in read filenanes (to identify illumina fwd/rev fastq files)")
                 print("ERROR(fastq): Check the fastq file names and/or update the --fwdrev parameter")
                 sys.exit(1)
-
+            fq_processed = os.path.join(out_dir_ff, Path(Path(fq).stem).stem + fq_result_suffix)
             pi.apply_async(pimms_fastq,
-                           args=(fq,
-                                 os.path.join(out_dir, Path(fq).stem + fq_result_suffix, out_dir_logs
-                                              # os.path.splitext(os.path.splitext(os.path.basename(fq))[0])[
-                                              #   0] + fq_result_suffix
-                                              )  # output illumina fastq output filepath
-                                 # (os.path.splitext(os.path.splitext(fq)[0])[0] + fq_result_suffix)))
-                                 )
+                           args=(fq, fq_processed, out_dir_logs)
                            )
+
         pi.close()
         pi.join()
 
@@ -1526,21 +1395,19 @@ def find_flank_func(parsed_args):
                 print("ERROR(fastq): Check the fastq file names and/or update the --fwdrev parameter")
                 sys.exit(1)
 
-            fq_processed = os.path.join(out_dir, Path(Path(fq).stem).stem + fq_result_suffix)
+            fq_processed = os.path.join(out_dir_ff, Path(Path(fq).stem).stem + fq_result_suffix)
             pi.apply_async(pimms_fastq,
-                           args=(fq, fq_processed, out_dir_logs
-                                 # os.path.join(out_dir, Path(Path(fq).stem).stem + fq_result_suffix)  # rmove double suffix
-                                 )
+                           args=(fq, fq_processed, out_dir_logs)
                            )
 
         pi.close()
         pi.join()
-        print("illumina initial PIMMS filtering completed...\n")
+        print("PIMMS read filtering completed...\n")
         print(datetime.datetime.now())
 
         # match fwdrev match substrings e.g: _R1_/_R2_ --fwdrev parameter
-        fqp_results_fwd = sorted(glob.glob(os.path.join(out_dir, "*" + fwdrev_wc[0] + "*" + fq_result_suffix)))
-        fqp_results_rev = sorted(glob.glob(os.path.join(out_dir, "*" + fwdrev_wc[1] + "*" + fq_result_suffix)))
+        fqp_results_fwd = sorted(glob.glob(os.path.join(out_dir_ff, "*" + fwdrev_wc[0] + "*" + fq_result_suffix)))
+        fqp_results_rev = sorted(glob.glob(os.path.join(out_dir_ff, "*" + fwdrev_wc[1] + "*" + fq_result_suffix)))
         print(fqp_results_fwd)
         print(fqp_results_rev)
         #
@@ -1567,7 +1434,7 @@ def find_flank_func(parsed_args):
             print(str(len(a)))
             print(str(len(b)))
             print(str(len(c)))
-            # pysam bug doesn't parse files gzipped in chuncks so gzipping removed here
+            # pysam bug doesn't parse files gzipped in chunks so gzipping removed here
             # with pysam.FastxFile(fwd_fqp_result) as fin, gzip.open(mrg_fqp_result_filename, mode='wt') as fout:
             with pysam.FastxFile(fwd_fqp_result, persist=False) as fin, open(mrg_fqp_result_filename,
                                                                              mode='wt') as fout:
@@ -1584,7 +1451,7 @@ def find_flank_func(parsed_args):
 
         # remove intermediate fastq files
         # if parsed_args[0].rmfiles:
-        if not parsed_args[0].keep:
+        if not parsed_args_ff[0].keep:
             delete_file_list(fqp_results_fwd)
             delete_file_list(fqp_results_rev)
 
@@ -1593,156 +1460,55 @@ def find_flank_func(parsed_args):
     # tidy up
     print(flanking_fastq_result_list)
     # concat_result_fastq = concat_fastq(flanking_fastq_result_list, parsed_args[0].label[0], fq_result_suffix, out_dir)
-    concat_result_fastq = concat_fastq_raw(flanking_fastq_result_list, label, fq_result_suffix, out_dir)
+    concat_result_fastq = concat_fastq_raw(flanking_fastq_result_list, label, fq_result_suffix, out_dir_ff)
 
     # merge logs from different parallel cpus
     merge_logs(out_dir_logs)
 
     # do mapping stuff
-    bam_name = ''
-    if parsed_args[0].nomap:
+    bam_name_ff = ''
+    if parsed_args_ff[0].nomap:
         print("Skipping mapping step...\n")
     else:
         if mapper == 'minimap2' or nano:
-            sam_output_mm = os.path.splitext(parsed_args[0].fasta[0])[0] + '_' + label + re.sub('.sam', '_mm2.sam',
-                                                                                                sam_result_suffix)
-            sam_output_mm = os.path.join(out_dir, sam_output_mm)
-            run_minimap2(concat_result_fastq, sam_output_mm, parsed_args[0].fasta[0])
-            bam_name = py_sam_to_bam(sam_output_mm)
+            sam_output_mm = os.path.splitext(parsed_args_ff[0].fasta[0])[0] + '_' + label + re.sub('.sam', '_mm2.sam',
+                                                                                                   sam_result_suffix)
+            sam_output_mm = os.path.join(out_dir_ff, sam_output_mm)
+            run_minimap2(concat_result_fastq, sam_output_mm, parsed_args_ff[0].fasta[0])
+            bam_name_ff = py_sam_to_bam(sam_output_mm)
         elif mapper == 'bwa':
-            sam_output_bwa = os.path.splitext(parsed_args[0].fasta[0])[0] + '_' + label + re.sub('.sam', '_bwa.sam',
-                                                                                                 sam_result_suffix)
-            sam_output_bwa = os.path.join(out_dir, sam_output_bwa)
-            run_bwa(concat_result_fastq, sam_output_bwa, parsed_args[0].fasta[0], ncpus)
-            bam_name = py_sam_to_bam(sam_output_bwa)
+            sam_output_bwa = os.path.splitext(parsed_args_ff[0].fasta[0])[0] + '_' + label + re.sub('.sam', '_bwa.sam',
+                                                                                                    sam_result_suffix)
+            sam_output_bwa = os.path.join(out_dir_ff, sam_output_bwa)
+            run_bwa(concat_result_fastq, sam_output_bwa, parsed_args_ff[0].fasta[0], ncpus)
+            bam_name_ff = py_sam_to_bam(sam_output_bwa)
 
-    return out_dir, bam_name
+    return out_dir_ff, bam_name_ff
 
+
+# end find_flank_func ###
+
+# FIND_FLANK ###
 
 if parsed_args[0].command == 'find_flank':
-
     out_dir, bam_name = find_flank_func(parsed_args)
 
-# SAM_EXTRACT ###
+# BAM_EXTRACT ###
 
-elif parsed_args[0].command == 'sam_extract':
-    sam_extract_func(parsed_args)
-#
-#     print(pimms_mssg + parsed_args[0].command + pimms_mssg2)
-#
-#     if parsed_args[0].nano:
-#         parsed_args[0].noreps = True
-#     # sort out extra requested gff annotation fields
-#     if parsed_args[0].gff_extra:
-#         # strip any formatting quotes and turn comma separated string into a list of fields
-#         gff_extra = parsed_args[0].gff_extra[0].strip("'\"").split(',')
-#     else:
-#         gff_extra = []
-#
-#     print("extra gff fields: " + str(gff_extra))
-#     gff_file = parsed_args[0].gff[0]
-#     gff_feat_type = ['CDS', 'tRNA', 'rRNA']
-#     # process the gff file to get required fields
-#     gff_columns_addback, attr_to_columns = process_gff(gff_file, gff_feat_type, gff_extra)
-#     # trap multiple return values from function
-#     # gff_file = '/Users/svzaw/Data/PIMMS_redo/PIMMS2_stuff/PIMMS_V1/S.uberis_0140J.gff3'
-#     # gff_file = 'UK15_assembly_fix03.gff'
-#     gff_columns_addback_pseudo, attr_to_columns_pseudo = process_gff(gff_file, ['pseudogene'], [])
-#
-#     # print(gff_columns_addback_pseudo)
-#     # print(attr_to_columns_pseudo)
-#
-#     # exit()
-#     # set up various variables and commandline parameters
-#     use_fraction_mismatch = True
-#     min_depth_cutoff = parsed_args[0].min_depth[0]
-#     # permitted_mismatch = 6
-#     fraction_mismatch = parsed_args[0].mismatch[0]
-#     sam_file = parsed_args[0].sam[0]
-#     condition_label = parsed_args[0].label[0]
-#
-#     # sam_stem, sam_ext = os.path.splitext(os.path.basename(sam_file))
-#     # sam_stem = sam_stem + '_md' + str(min_depth_cutoff) + '_mm' + str(fraction_mismatch or '')
-#
-#     # check all sequence names match up
-#     seqID_consistancy_check(gff_columns_addback, sam_file)
-#     # process pimms sam/bam  file and produce coordinate / bed files
-#     process_sam(sam_file)
-#
-#     sam_stem = modify_sam_stem(sam_file)
-#
-#     # allocate insertions to features and create results merged with GFF
-#     # possibly poor coding to merge with gff here
-#     pimms_result_table_full = coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, condition_label)
-#     # if parsed_args[0].nano:
-#     #    print("--noreps forced for nanopore data\n")
-#     if not parsed_args[0].noreps:
-#         print("processing read groups as replicates for illumina data\n")
-#         mp_reps_feature_counts = coordinates_to_features_reps(sam_stem, attr_to_columns, condition_label)
-#         if not mp_reps_feature_counts.empty:
-#             merged_with_reps = pimms_result_table_full.merge(mp_reps_feature_counts, on=["seq_id", "start", "end"],
-#                                                              how='inner')
-#             pimms_result_table_full = merged_with_reps
-#     else:
-#         print("not processing read groups as replicates\n")
-#
-#     if not gff_columns_addback_pseudo.empty:
-#         tag_psueudogenes = gff_columns_addback_pseudo['locus_tag']
-#         pimms_result_table_full.loc[pimms_result_table_full.locus_tag.isin(tag_psueudogenes), "type"] = \
-#             pimms_result_table_full['type'] + '_pseudo'
-#
-#     # write results as text/excel
-#     if parsed_args[0].out_fmt[0] == 'tsv':
-#         pimms_result_table_full.to_csv(sam_stem + "_countinfo.tsv", index=False, sep='\t')
-#     elif parsed_args[0].out_fmt[0] == 'csv':
-#         pimms_result_table_full.to_csv(sam_stem + "_countinfo.csv", index=False, sep=',')
-#     else:
-#         writer = pd.ExcelWriter(sam_stem + '_countinfo.xlsx', engine='xlsxwriter')
-#         # Convert the dataframe to an XlsxWriter Excel object.
-#         pimms_result_table_full.to_excel(writer, sheet_name='PIMMS2_result', index=False)
-#         # Close the Pandas Excel writer and output the Excel file.
-#         writer.save()
-#
+elif parsed_args[0].command == 'bam_extract':
+    bam_extract_func(parsed_args)
+
 
 # TABLE_MERGE ###
 
 elif parsed_args[0].command == 'table_merge':
     table_merge_func(parsed_args)
-    # print(pimms_mssg + parsed_args[0].command + pimms_mssg2)
-    # if parsed_args[0].xlsx:
-    #     print("Join: ", parsed_args[0].xlsx[0], "\t", parsed_args[0].xlsx[1], "\n")
-    #     # requires openpyxl dependancy installed
-    #     result_df1 = pd.read_excel(parsed_args[0].xlsx[0], engine="openpyxl")
-    #     result_df2 = pd.read_excel(parsed_args[0].xlsx[1], engine="openpyxl")
-    #     results_merged = pd.DataFrame.merge(result_df1, result_df2)
-    #     writer = pd.ExcelWriter('merged_result.xlsx', engine='xlsxwriter')
-    #     # Convert the dataframe to an XlsxWriter Excel object.
-    #     results_merged.to_excel(writer, sheet_name='PIMMS2_merged_result', index=False)
-    #     # Close the Pandas Excel writer and output the Excel file.
-    #     writer.save()
-    # elif parsed_args[0].csv:
-    #     print("Join: ", parsed_args[0].csv[0], "\t", parsed_args[0].csv[1], "\n")
-    #     result_df1 = pd.read_csv(parsed_args[0].csv[0]).replace('"', '', regex=True)
-    #     result_df2 = pd.read_csv(parsed_args[0].csv[1]).replace('"', '', regex=True)
-    #     results_merged = pd.DataFrame.merge(result_df1, result_df2)
-    #     results_merged.to_csv('merged_result.csv', index=False)
-    # elif parsed_args[0].tsv:
-    #     print("Join: ", parsed_args[0].tsv[0], "\t", parsed_args[0].tsv[1], "\n")
-    #     result_df1 = pd.read_csv(parsed_args[0].tsv[0], sep="\t")
-    #     result_df2 = pd.read_csv(parsed_args[0].tsv[1], sep="\t")
-    #     results_merged = pd.DataFrame.merge(result_df1, result_df2)
-    #     results_merged.to_csv('merged_result.txt', index=False, sep="\t")
-    # else:
-    #     print("\nUnable to merge results tables\n")
+
+
+# FULL_PROCESS ###
 
 elif parsed_args[0].command == 'full_process':
-
     out_dir, bam_name = find_flank_func(parsed_args)
     parsed_args[0].out_dir[0] = out_dir
-    parsed_args[0].sam[0] = bam_name
-    sam_extract_func(parsed_args)
-
-
-elif parsed_args[0].command == 'other_stuff':
-    print("'other_stuff' is a place holder for adding more functionality to PIMMS2.\n" +
-          "Please contact the developers if you have requests for expanding PIMMS2 data analysis functions.")
+    parsed_args[0].bam[0] = bam_name
+    bam_extract_func(parsed_args)
