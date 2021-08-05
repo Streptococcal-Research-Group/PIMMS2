@@ -132,6 +132,15 @@ def concat_fastq_raw(flanking_fastq_list, label, fq_file_suffix, concat_out_dir)
 ############################
 # FIND_FLANK FUNCTIONS:
 ############################
+
+def find_read_files_with_glob(indir, wildcards):
+    for suffix_wc in wildcards:
+        read_files = glob.glob(indir + suffix_wc)
+        if len(read_files):
+            return read_files
+    sys.exit("SYS EXIT: unable to find read files, check file suffixes match permissible: " + wildcards + '\n')
+
+
 def merge_logs(log_path):
     log_files = glob.glob(os.path.join(log_path, "log_*txt"))
 
@@ -228,7 +237,7 @@ def py_sam_to_bam(sam_output_result):
     return bam_output_result
 
 
-def pimms_fastq(fq_filename, fqout_filename, out_dir_logs):
+def pimms_fastq(fq_filename, fqout_filename, out_dir_logs, nano):
     trans = str.maketrans('ATGCN', 'TACGN')  # complement DNA lookup
     qry1 = parsed_args[0].motif1[0].strip("'\"")
     qry2 = parsed_args[0].motif2[0].strip("'\"")
@@ -241,12 +250,17 @@ def pimms_fastq(fq_filename, fqout_filename, out_dir_logs):
     # print(str(qry1rc))
     # print(str(qry2rc))
 
-    if parsed_args[0].nano:  # nano == True
-        # parsed_args[0].noreps = True
+    # if parsed_args[0].nano:  # nano == True
+    if nano:  # nano == True
+        subs = 0
+        insrt = 0
+        dels = 0
+
         fuzzy_levenshtein = True
         l_dist = parsed_args[0].lev[0]  # maximum Levenshtein Distance
         min_length = 50
         max_length = 200
+        qual_char = parsed_args[0].qual_char
         print('overriding with Nanopore appropriate settings: Levenshtein distance of ' + str(
             l_dist) + ' + sequence length min = ' + str(min_length) + ', max = ' + str(max_length))
     else:
@@ -256,8 +270,8 @@ def pimms_fastq(fq_filename, fqout_filename, out_dir_logs):
         fuzzy_levenshtein = bool(l_dist)
         insrt = parsed_args[0].insert[0]
         dels = parsed_args[0].deletion[0]
-        min_length = parsed_args[0].min[0]
-        max_length = parsed_args[0].max[0]
+        min_length = parsed_args[0].min
+        max_length = parsed_args[0].max
     # print('standard settings\n')
 
     # print("\n" + fq_filename + "  ->>\n" + fqout_filename + "#####################\n")
@@ -366,6 +380,9 @@ def pimms_fastq(fq_filename, fqout_filename, out_dir_logs):
                 countq1q2 += 1
                 captured_seqstring = str(entry.sequence)[matchesq1[0].end:matchesq2[0].start]
                 captured_qualstring = str(entry.quality)[matchesq1[0].end:matchesq2[0].start]
+                if len(captured_qualstring) < 5:
+                    captured_qualstring = qual_char * len(captured_seqstring)
+
                 if matchesq2[0].start <= matchesq1[0].end:
                     wrongq2q1 += 1
                     # reject_reads_list.append(entry.name)
@@ -392,6 +409,9 @@ def pimms_fastq(fq_filename, fqout_filename, out_dir_logs):
                 countq2rcq1rc += 1
                 captured_seqstring = str(entry.sequence)[matchesq2rc[0].end:matchesq1rc[0].start]
                 captured_qualstring = str(entry.quality)[matchesq2rc[0].end:matchesq1rc[0].start]
+                if len(captured_qualstring) < 5:
+                    captured_qualstring = qual_char * len(captured_seqstring)
+
                 if matchesq1rc[0].start <= matchesq2rc[0].end:
                     wrongq1rcq2rc += 1
                     # reject_reads_dict.update({entry.name: 'ooorder'})
@@ -416,6 +436,9 @@ def pimms_fastq(fq_filename, fqout_filename, out_dir_logs):
                                      matchesq1[0].end:]  # nothing after colon indicates end of string
                 captured_qualstring = str(entry.quality)[
                                       matchesq1[0].end:]
+                if len(captured_qualstring) < 5:
+                    captured_qualstring = qual_char * len(captured_seqstring)
+
                 if len(captured_seqstring) >= min_length:
                     hit_q1_only += 1
                     # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
@@ -436,6 +459,9 @@ def pimms_fastq(fq_filename, fqout_filename, out_dir_logs):
                                      matchesq2rc[0].end:]  # nothing after colon indicates end of string
                 captured_qualstring = str(entry.quality)[
                                       matchesq2rc[0].end:]
+                if len(captured_qualstring) < 5:
+                    captured_qualstring = qual_char * len(captured_seqstring)
+
                 if len(captured_seqstring) >= min_length:
                     hit_q2rc_only += 1
                     # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
@@ -456,6 +482,9 @@ def pimms_fastq(fq_filename, fqout_filename, out_dir_logs):
                                      0:matchesq1rc[0].start]  # nothing after colon indicates end of string
                 captured_qualstring = str(entry.quality)[
                                       0:matchesq1rc[0].start]
+                if len(captured_qualstring) < 5:
+                    captured_qualstring = qual_char * len(captured_seqstring)
+
                 if len(captured_seqstring) >= min_length:
                     hit_q1rc_only += 1
                     # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
@@ -476,6 +505,9 @@ def pimms_fastq(fq_filename, fqout_filename, out_dir_logs):
                                      0:matchesq2[0].start]  # nothing after colon indicates end of string
                 captured_qualstring = str(entry.quality)[
                                       0:matchesq2[0].start]
+                if len(captured_qualstring) < 5:
+                    captured_qualstring = qual_char * len(captured_seqstring)
+
                 if len(captured_seqstring) >= min_length:
                     hit_q2_only += 1
                     # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
@@ -943,10 +975,11 @@ def parse_arguments():
 
     findflank = modes.add_parser("find_flank", add_config_file_help=False,
                                  help="Mode: find read regions flanking the IS sequence by mapping them to the target genome",
-                                 description="Args that start with '--' (eg. --bam) can also be set in a config file (specified via -c)")
+                                 description="Args that start with '--' (eg. --fasta) can also be set in a config file (specified via -c)")
+
     samcoords = modes.add_parser("bam_extract", add_config_file_help=False,
                                  help="Mode: extract insertion site coordinates from sam file",
-                                 description="Args that start with '--' (eg. --bam) can also be set in a config file (specified via -c)")
+                                 description="Args that start with '--' (eg. --fasta) can also be set in a config file (specified via -c)")
 
     tablemerge = modes.add_parser("table_merge", add_config_file_help=False,
                                   help='Mode: merge two compatible PIMMS results tables '
@@ -954,7 +987,7 @@ def parse_arguments():
 
     fullprocess = modes.add_parser("full_process", add_config_file_help=False,
                                    help="Mode: find_flank + bam_extract",
-                                   description="Args that start with '--' (eg. --bam) can also be set in a config file (specified via -c)")
+                                   description="Args that start with '--' (eg. --fasta) can also be set in a config file (specified via -c)")
 
     # FIND_FLANK args
     # to fix: nargs='?' deal with mistaken use of nargs=1 which give a single element list
@@ -965,6 +998,8 @@ def parse_arguments():
                            help="override with settings more suitable for nanopore")
     findflank.add_argument("--fasta", required=False, nargs=1, metavar='ref_genome.fasta', type=extant_file,
                            help="fasta file for reference genome ")
+    findflank.add_argument("--qual_char", required=False, nargs='?', type=str, default='0', choices=[chr(x + 33) for x in list(range(12, 31))],
+                           help="substitute a quality score ascii character when fasta read files used (nanopore only) (phred +33: ascii +:?) ['0']")
     findflank.add_argument("--nomap", required=False, action='store_true', default=False,
                            help="do not run mapping step")
     findflank.add_argument("--mapper", required=False, nargs='?', type=str, default='bwa', choices=['minimap2', 'bwa'],
@@ -991,9 +1026,9 @@ def parse_arguments():
     findflank.add_argument("--cpus", required=False, nargs=1, type=int,  # default=[4],
                            default=[int(os.cpu_count() / 2)],
                            help="number of processors to use [(os.cpu_count() / 2)] ")
-    findflank.add_argument("--max", required=True, nargs=1, type=int, default=60,
+    findflank.add_argument("--max", required=False, nargs=1, type=int, default=60,
                            help="clip results to this length [illumina:60/nano:100]")
-    findflank.add_argument("--min", required=True, nargs=1, type=int, default=25,
+    findflank.add_argument("--min", required=False, nargs=1, type=int, default=25,
                            help="minimum read length [illumina:60/nano:100]")
     findflank.add_argument("--motif1", required=False, nargs=1, type=str, default=['TCAGAAAACTTTGCAACAGAACC'],
                            # revcomp: GGTTCTGTTGCAAAGTTTTCTGA
@@ -1045,6 +1080,8 @@ def parse_arguments():
                              help="use parameters from config file")
     fullprocess.add_argument("--nano", required=False, action='store_true', default=False,
                              help="override with settings more suitable for nanopore")
+    fullprocess.add_argument("--qual_char", required=False, nargs='?', type=str, default='0', choices=[chr(x + 33) for x in list(range(12, 31))],
+                             help="substitute a quality score ascii character when fasta read files used (nanopore only) (phred +33: ascii +:?) ['0']")
     fullprocess.add_argument("--fasta", required=False, nargs=1, metavar='ref_genome.fasta', type=extant_file,
                              help="fasta file for reference genome ")
     fullprocess.add_argument("--nomap", required=False, action='store_true', default=False,
@@ -1228,7 +1265,7 @@ def table_merge_func(parsed_args_tm):
     print(pimms_mssg + parsed_args_tm[0].command + pimms_mssg2)
     if parsed_args_tm[0].xlsx:
         print("Join: ", parsed_args_tm[0].xlsx[0], "\t", parsed_args_tm[0].xlsx[1], "\n")
-        # requires openpyxl dependancy installed
+        # requires  dependancy installed
         result_df1 = pd.read_excel(parsed_args_tm[0].xlsx[0], engine="openpyxl")
         result_df2 = pd.read_excel(parsed_args_tm[0].xlsx[1], engine="openpyxl")
         results_merged = pd.DataFrame.merge(result_df1, result_df2)
@@ -1268,7 +1305,7 @@ def find_flank_func(parsed_args_ff):
     # p2config = configparser.ConfigParser()
     mapper = parsed_args_ff[0].mapper
     label = parsed_args_ff[0].label[0]
-    print("\nFF label" + label + "\n")
+    print("\nFF label " + label + "\n")
 
     if parsed_args_ff[0].out_dir[0]:
         out_dir_ff = parsed_args_ff[0].out_dir[0]
@@ -1302,13 +1339,14 @@ def find_flank_func(parsed_args_ff):
     # experimental decontaminate transposon/vector sequence
     # not currently effective try another implementation when time allows?
     # decontam_tranposon = False
+    #  print(parsed_args_ff[0].sub[0])
     fuzzy_levenshtein = bool(parsed_args_ff[0].lev[0])
 
     # set up some variables:
     if nano:  # nano == True
         # parsed_args[0].noreps = True
         fuzzy_levenshtein = True
-        l_dist = parsed_args_ff[0].lev  # maximum Levenshtein Distance
+        l_dist = parsed_args_ff[0].lev[0]  # maximum Levenshtein Distance
         min_length = 50
         max_length = 200
         print('overriding with Nanopore appropriate settings: Levenshtein distance of ' + str(
@@ -1318,8 +1356,8 @@ def find_flank_func(parsed_args_ff):
         l_dist = parsed_args_ff[0].lev[0]  # maximum Levenshtein Distance
         insrt = parsed_args_ff[0].insert[0]
         dels = parsed_args_ff[0].deletion[0]
-        min_length = parsed_args_ff[0].min[0]
-        max_length = parsed_args_ff[0].max[0]
+        min_length = parsed_args_ff[0].min
+        max_length = parsed_args_ff[0].max
 
     # set up some names
     if nano:
@@ -1340,40 +1378,52 @@ def find_flank_func(parsed_args_ff):
     fastq_dir = os.path.join(parsed_args_ff[0].in_dir[0], '')
 
     flanking_fastq_result_list = []
+
     if nano:  # nano == True
+
+        glob_wc = ["*q.gz", "*.fastq", "*.fasta", "*.fasta.gz"]
+        glob_read_files = find_read_files_with_glob(fastq_dir, glob_wc)
+        print(glob_read_files, "...\n")
         print("nanopore PIMMS filtering starting...\n")
         print(datetime.datetime.now())
 
         pi = multiprocessing.Pool(ncpus)
-        for fq in glob.glob(fastq_dir + "*q.gz"):
+        # for fq in glob.glob(fastq_dir + "*[aq].gz"):
+        for fq in glob_read_files:
             fq_processed = os.path.join(out_dir_ff, Path(Path(fq).stem).stem + fq_result_suffix)
             flanking_fastq_result_list = flanking_fastq_result_list + [fq_processed]
             pi.apply_async(pimms_fastq,
-                           args=(fq, fq_processed)
+                           # args=(fq, fq_processed, nano)
+                           args=(fq, fq_processed, out_dir_logs, nano)
                            )
 
         pi.close()
         pi.join()
 
-        pi = multiprocessing.Pool(ncpus)
-        for fq in glob.glob(fastq_dir + "*.fastq"):
-            fq_processed = os.path.join(out_dir_ff, Path(Path(fq).stem).stem + fq_result_suffix)
-            flanking_fastq_result_list = flanking_fastq_result_list + [fq_processed]
-            pi.apply_async(pimms_fastq,
-                           args=(fq, fq_processed)
-                           )
-
-        pi.close()
-        pi.join()
+        # pi = multiprocessing.Pool(ncpus)
+        # for fq in glob.glob(fastq_dir + "*.fast[aq]"):
+        #     fq_processed = os.path.join(out_dir_ff, Path(Path(fq).stem).stem + fq_result_suffix)
+        #     flanking_fastq_result_list = flanking_fastq_result_list + [fq_processed]
+        #     pi.apply_async(pimms_fastq,
+        #                    args=(fq, fq_processed)
+        #                    )
+        #
+        # pi.close()
+        # pi.join()
 
         print("nanopore PIMMS filtering completed...\n")
         print(datetime.datetime.now())
 
     else:  # nano == False
+
+        glob_wc = ["*q.gz", "*.fastq"]
+        glob_read_files = find_read_files_with_glob(fastq_dir, glob_wc)
+
         print("PIMMS read filtering starting...\n")
         print(datetime.datetime.now())
         pi = multiprocessing.Pool(ncpus)
-        for fq in glob.glob(fastq_dir + "*.fastq"):
+        # for fq in glob.glob(fastq_dir + "*.fastq"):
+        for fq in glob_read_files:
             if not (fwdrev_wc[0] in fq or fwdrev_wc[1] in fq):
                 print("ERROR(fastq): text substrings " + fwdrev_wc[0] + "/" + fwdrev_wc[
                     1] + " NOT FOUND in read filenanes (to identify illumina fwd/rev fastq files)")
@@ -1381,27 +1431,27 @@ def find_flank_func(parsed_args_ff):
                 sys.exit(1)
             fq_processed = os.path.join(out_dir_ff, Path(Path(fq).stem).stem + fq_result_suffix)
             pi.apply_async(pimms_fastq,
-                           args=(fq, fq_processed, out_dir_logs)
+                           args=(fq, fq_processed, out_dir_logs, nano)
                            )
 
         pi.close()
         pi.join()
 
-        pi = multiprocessing.Pool(ncpus)
-        for fq in glob.glob(fastq_dir + "*q.gz"):
-            if not (fwdrev_wc[0] in fq or fwdrev_wc[1] in fq):
-                print("ERROR(fastq): text substrings " + fwdrev_wc[0] + "/" + fwdrev_wc[
-                    1] + " NOT FOUND in read filenanes (to identify illumina fwd/rev fastq files)")
-                print("ERROR(fastq): Check the fastq file names and/or update the --fwdrev parameter")
-                sys.exit(1)
-
-            fq_processed = os.path.join(out_dir_ff, Path(Path(fq).stem).stem + fq_result_suffix)
-            pi.apply_async(pimms_fastq,
-                           args=(fq, fq_processed, out_dir_logs)
-                           )
-
-        pi.close()
-        pi.join()
+        # pi = multiprocessing.Pool(ncpus)
+        # for fq in glob.glob(fastq_dir + "*q.gz"):
+        #     if not (fwdrev_wc[0] in fq or fwdrev_wc[1] in fq):
+        #         print("ERROR(fastq): text substrings " + fwdrev_wc[0] + "/" + fwdrev_wc[
+        #             1] + " NOT FOUND in read filenanes (to identify illumina fwd/rev fastq files)")
+        #         print("ERROR(fastq): Check the fastq file names and/or update the --fwdrev parameter")
+        #         sys.exit(1)
+        #
+        #     fq_processed = os.path.join(out_dir_ff, Path(Path(fq).stem).stem + fq_result_suffix)
+        #     pi.apply_async(pimms_fastq,
+        #                    args=(fq, fq_processed, out_dir_logs)
+        #                    )
+        #
+        # pi.close()
+        # pi.join()
         print("PIMMS read filtering completed...\n")
         print(datetime.datetime.now())
 
