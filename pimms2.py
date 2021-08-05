@@ -252,7 +252,10 @@ def pimms_fastq(fq_filename, fqout_filename, out_dir_logs, nano):
 
     # if parsed_args[0].nano:  # nano == True
     if nano:  # nano == True
-        # parsed_args[0].noreps = True
+        subs = 0
+        insrt = 0
+        dels = 0
+
         fuzzy_levenshtein = True
         l_dist = parsed_args[0].lev[0]  # maximum Levenshtein Distance
         min_length = 50
