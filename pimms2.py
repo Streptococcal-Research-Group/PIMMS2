@@ -252,29 +252,30 @@ def pimms_fastq(fq_filename, fqout_filename, out_dir_logs, nano):
 
     # if parsed_args[0].nano:  # nano == True
     if nano:  # nano == True
-        subs = 0
-        insrt = 0
-        dels = 0
-
+        # parsed_args[0].noreps = True
+        print('nano == True\n')
         fuzzy_levenshtein = True
         l_dist = parsed_args[0].lev[0]  # maximum Levenshtein Distance
-        min_length = 50
-        max_length = 200
+        # min_length = 50
+        # max_length = 200
+        min_length = parsed_args[0].min[0]
+        max_length = parsed_args[0].max[0]
         qual_char = parsed_args[0].qual_char
-        print('overriding with Nanopore appropriate settings: Levenshtein distance of ' + str(
-            l_dist) + ' + sequence length min = ' + str(min_length) + ', max = ' + str(max_length))
+        # print('overriding with Nanopore appropriate settings: Levenshtein distance of ' + str(
+        #   l_dist) + ' + sequence length min = ' + str(min_length) + ', max = ' + str(max_length))
     else:
+        print('nano == False\n')
         # fuzzy_levenshtein = False
         subs = parsed_args[0].sub[0]
         l_dist = parsed_args[0].lev[0]  # maximum Levenstein Distance
         fuzzy_levenshtein = bool(l_dist)
         insrt = parsed_args[0].insert[0]
         dels = parsed_args[0].deletion[0]
-        min_length = parsed_args[0].min
-        max_length = parsed_args[0].max
+        min_length = parsed_args[0].min[0]
+        max_length = parsed_args[0].max[0]
     # print('standard settings\n')
 
-    # print("\n" + fq_filename + "  ->>\n" + fqout_filename + "#####################\n")
+
 
     count = 0
     countq1 = 0
@@ -305,224 +306,430 @@ def pimms_fastq(fq_filename, fqout_filename, out_dir_logs, nano):
     # reject_reads_list = []
     # reject_reads_dict = dict()
 
-    with pysam.FastxFile(fq_filename, persist=False) as fin, open(fqout_filename, mode='wt') as fout:
-        print(fq_filename, '  ==>\n\t\t\t', fqout_filename, '\n')
-        for entry in fin:
-            count += 1
-
-            if not fuzzy_levenshtein:
-                # print('find_near_matches \n')
-                matchesq1 = find_near_matches(qry1, entry.sequence, max_substitutions=subs, max_deletions=dels,
-                                              max_insertions=insrt)
-                matchesq2 = find_near_matches(qry2, entry.sequence, max_substitutions=subs, max_deletions=dels,
-                                              max_insertions=insrt)
-                matchesq1rc = find_near_matches(qry1rc, entry.sequence, max_substitutions=subs, max_deletions=dels,
-                                                max_insertions=insrt)
-                matchesq2rc = find_near_matches(qry2rc, entry.sequence, max_substitutions=subs, max_deletions=dels,
-                                                max_insertions=insrt)
-            else:
-                # print('find_near_matches lev\n')
-                matchesq1 = find_near_matches(qry1, entry.sequence, max_l_dist=l_dist)
-                matchesq2 = find_near_matches(qry2, entry.sequence, max_l_dist=l_dist)
-                matchesq1rc = find_near_matches(qry1rc, entry.sequence, max_l_dist=l_dist)
-                matchesq2rc = find_near_matches(qry2rc, entry.sequence, max_l_dist=l_dist)
-
-            if not bool(matchesq1 + matchesq2 + matchesq1rc + matchesq2rc):
-                # print(matchesq1 + matchesq2 + matchesq1rc + matchesq1rc)
-                # reject_reads_dict.update({entry.name: 'nomatch'})
-                continue
-            # skip fastq entry if multiple matches to same motif query seq
-            if len(matchesq1) > 1:
-                countqmulti += 1
-                # reject_reads_list.append(entry.name)
-                # reject_reads_dict.update({entry.name: 'multi'})
-                continue
-            if len(matchesq2) > 1:
-                countqmulti += 1
-                # reject_reads_list.append(entry.name)
-                # reject_reads_dict.update({entry.name: 'multi'})
-                continue
-            if len(matchesq1rc) > 1:
-                countqmulti += 1
-                # reject_reads_list.append(entry.name)
-                # reject_reads_dict.update({entry.name: 'multi'})
-                continue
-            if len(matchesq2rc) > 1:
-                countqmulti += 1
-                # reject_reads_list.append(entry.name)
-                # reject_reads_dict.update({entry.name: 'multi'})
-                continue
-            # skip fastq entry if multiple matches to same motif query direct and reverse complement
-
-            if (len(matchesq1) == 1) and (len(matchesq1rc) == 1):
-                countqqrc += 1
-                # reject_reads_list.append(entry.name)
-                # reject_reads_dict.update({entry.name: 'multicomp'})
-                continue
-            if (len(matchesq2) == 1) and (len(matchesq2rc) == 1):
-                countqqrc += 1
-                # reject_reads_list.append(entry.name)
-                # reject_reads_dict.update({entry.name: 'multicomp'})
-                continue
-            # or matches to two incompatible motifs
-            if (len(matchesq1) == 1) and (len(matchesq2rc) == 1):
-                countqqrc += 1
-                # reject_reads_list.append(entry.name)
-                # reject_reads_dict.update({entry.name: 'multicomp'})
-                continue
-            if (len(matchesq2) == 1) and (len(matchesq1rc) == 1):
-                countqqrc += 1
-                # reject_reads_list.append(entry.name)
-                # reject_reads_dict.update({entry.name: 'multicomp'})
-                continue
-            # process motif match pairs to extract target sequences
-            if (len(matchesq1) == 1) and (len(matchesq2) == 1):
-                countq1q2 += 1
-                captured_seqstring = str(entry.sequence)[matchesq1[0].end:matchesq2[0].start]
-                captured_qualstring = str(entry.quality)[matchesq1[0].end:matchesq2[0].start]
-                if len(captured_qualstring) < 5:
-                    captured_qualstring = qual_char * len(captured_seqstring)
-
-                if matchesq2[0].start <= matchesq1[0].end:
-                    wrongq2q1 += 1
-                    # reject_reads_list.append(entry.name)
-                    # reject_reads_dict.update({entry.name: 'ooorder'})
-                    continue
-
-                if len(captured_seqstring) >= min_length:
-                    hit_q1_q2 += 1
-                    # print('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                    # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                    fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
-                        entry.comment) + '\n')  # make comment bam compatible
-                    fout.write(captured_seqstring[0:max_length] + '\n')
-                    fout.write('+' + '\n')
-                    fout.write(captured_qualstring[0:max_length] + '\n')
-                    continue
+    # To resolve/reharmonise: diferent processing code for nanopore and Illumina input files
+    if nano:
+        with pysam.FastxFile(fq_filename, persist=False) as fin, open(fqout_filename, mode='wt') as fout:
+            print(fq_filename, '  ==>\n\t##\t##\t', fqout_filename, '\n')
+            for entry in fin:
+                count += 1
+                # print(str(count) + '\n')
+                if not fuzzy_levenshtein:
+                    # print('find_near_matches \n')
+                    matchesq1 = find_near_matches(qry1, entry.sequence, max_substitutions=subs, max_deletions=dels,
+                                                  max_insertions=insrt)
+                    matchesq2 = find_near_matches(qry2, entry.sequence, max_substitutions=subs, max_deletions=dels,
+                                                  max_insertions=insrt)
+                    matchesq1rc = find_near_matches(qry1rc, entry.sequence, max_substitutions=subs, max_deletions=dels,
+                                                    max_insertions=insrt)
+                    matchesq2rc = find_near_matches(qry2rc, entry.sequence, max_substitutions=subs, max_deletions=dels,
+                                                    max_insertions=insrt)
                 else:
-                    hit_but_short_q1_q2 += 1
-                    # reject_reads_list.append(entry.name)
-                    # reject_reads_dict.update({entry.name: 'short'})
-                continue
-            #            break
-            if (len(matchesq1rc) == 1) and (len(matchesq2rc) == 1):
-                countq2rcq1rc += 1
-                captured_seqstring = str(entry.sequence)[matchesq2rc[0].end:matchesq1rc[0].start]
-                captured_qualstring = str(entry.quality)[matchesq2rc[0].end:matchesq1rc[0].start]
-                if len(captured_qualstring) < 5:
-                    captured_qualstring = qual_char * len(captured_seqstring)
+                    # print('find_near_matches lev\n')
+                    matchesq1 = find_near_matches(qry1, entry.sequence, max_l_dist=l_dist)
+                    matchesq2 = find_near_matches(qry2, entry.sequence, max_l_dist=l_dist)
+                    matchesq1rc = find_near_matches(qry1rc, entry.sequence, max_l_dist=l_dist)
+                    matchesq2rc = find_near_matches(qry2rc, entry.sequence, max_l_dist=l_dist)
 
-                if matchesq1rc[0].start <= matchesq2rc[0].end:
-                    wrongq1rcq2rc += 1
-                    # reject_reads_dict.update({entry.name: 'ooorder'})
-                if len(captured_seqstring) >= min_length:
-                    hit_q2rc_q1rc += 1
-                    # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                    fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
-                        entry.comment) + '\n')  # make comment bam compatible
-                    fout.write(captured_seqstring[0:max_length] + '\n')
-                    fout.write('+' + '\n')
-                    fout.write(captured_qualstring[0:max_length] + '\n')
+                if not bool(matchesq1 + matchesq2 + matchesq1rc + matchesq2rc):
+                    # print(matchesq1 + matchesq2 + matchesq1rc + matchesq1rc)
+                    # reject_reads_dict.update({entry.name: 'nomatch'})
                     continue
-                else:
-                    hit_but_short_q2rc_q1rc += 1
+                # skip fastq entry if multiple matches to same motif query seq
+                if len(matchesq1) > 1:
+                    countqmulti += 1
                     # reject_reads_list.append(entry.name)
-                    # reject_reads_dict.update({entry.name: 'short'})
-                continue
-            # process single motif matches to extract target sequences
-            if len(matchesq1) == 1:
-                countq1 += 1
-                captured_seqstring = str(entry.sequence)[
-                                     matchesq1[0].end:]  # nothing after colon indicates end of string
-                captured_qualstring = str(entry.quality)[
-                                      matchesq1[0].end:]
-                if len(captured_qualstring) < 5:
-                    captured_qualstring = qual_char * len(captured_seqstring)
-
-                if len(captured_seqstring) >= min_length:
-                    hit_q1_only += 1
-                    # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                    fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
-                        entry.comment) + '\n')  # make comment bam compatible
-                    fout.write(captured_seqstring[0:max_length] + '\n')
-                    fout.write('+' + '\n')
-                    fout.write(captured_qualstring[0:max_length] + '\n')
+                    # reject_reads_dict.update({entry.name: 'multi'})
                     continue
-                else:
-                    hit_but_short_q1_only += 1
+                if len(matchesq2) > 1:
+                    countqmulti += 1
                     # reject_reads_list.append(entry.name)
-                    # reject_reads_dict.update({entry.name: 'short'})
-                continue
-            if len(matchesq2rc) == 1:
-                countq2rc += 1
-                captured_seqstring = str(entry.sequence)[
-                                     matchesq2rc[0].end:]  # nothing after colon indicates end of string
-                captured_qualstring = str(entry.quality)[
-                                      matchesq2rc[0].end:]
-                if len(captured_qualstring) < 5:
-                    captured_qualstring = qual_char * len(captured_seqstring)
-
-                if len(captured_seqstring) >= min_length:
-                    hit_q2rc_only += 1
-                    # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                    fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
-                        entry.comment) + '\n')  # make comment bam compatible
-                    fout.write(captured_seqstring[0:max_length] + '\n')
-                    fout.write('+' + '\n')
-                    fout.write(captured_qualstring[0:max_length] + '\n')
+                    # reject_reads_dict.update({entry.name: 'multi'})
                     continue
-                else:
-                    hit_but_short_q2rc_only += 1
+                if len(matchesq1rc) > 1:
+                    countqmulti += 1
                     # reject_reads_list.append(entry.name)
-                    # reject_reads_dict.update({entry.name: 'short'})
-                continue
-            if len(matchesq1rc) == 1:
-                countq1rc += 1
-                captured_seqstring = str(entry.sequence)[
-                                     0:matchesq1rc[0].start]  # nothing after colon indicates end of string
-                captured_qualstring = str(entry.quality)[
-                                      0:matchesq1rc[0].start]
-                if len(captured_qualstring) < 5:
-                    captured_qualstring = qual_char * len(captured_seqstring)
-
-                if len(captured_seqstring) >= min_length:
-                    hit_q1rc_only += 1
-                    # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                    fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
-                        entry.comment) + '\n')  # make comment bam compatible
-                    fout.write(captured_seqstring[-max_length:].translate(trans)[::-1] + '\n')
-                    fout.write('+' + '\n')
-                    fout.write(captured_qualstring[-max_length:][::-1] + '\n')
+                    # reject_reads_dict.update({entry.name: 'multi'})
                     continue
-                else:
-                    hit_but_short_q1rc_only += 1
+                if len(matchesq2rc) > 1:
+                    countqmulti += 1
                     # reject_reads_list.append(entry.name)
-                    # reject_reads_dict.update({entry.name: 'short'})
-                continue
-            if len(matchesq2) == 1:
-                countq2 += 1
-                captured_seqstring = str(entry.sequence)[
-                                     0:matchesq2[0].start]  # nothing after colon indicates end of string
-                captured_qualstring = str(entry.quality)[
-                                      0:matchesq2[0].start]
-                if len(captured_qualstring) < 5:
-                    captured_qualstring = qual_char * len(captured_seqstring)
-
-                if len(captured_seqstring) >= min_length:
-                    hit_q2_only += 1
-                    # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                    fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
-                        entry.comment) + '\n')  # make comment bam compatible
-                    fout.write(captured_seqstring[-max_length:].translate(trans)[::-1] + '\n')
-                    fout.write('+' + '\n')
-                    fout.write(captured_qualstring[-max_length:][::-1] + '\n')
+                    # reject_reads_dict.update({entry.name: 'multi'})
                     continue
-                else:
-                    hit_but_short_q2_only += 1
-                    # reject_reads_list.append(entry.name)
-                    # reject_reads_dict.update({entry.name: 'short'})
-                continue
+                # skip fastq entry if multiple matches to same motif query direct and reverse complement
 
+                if (len(matchesq1) == 1) and (len(matchesq1rc) == 1):
+                    countqqrc += 1
+                    # reject_reads_list.append(entry.name)
+                    # reject_reads_dict.update({entry.name: 'multicomp'})
+                    continue
+                if (len(matchesq2) == 1) and (len(matchesq2rc) == 1):
+                    countqqrc += 1
+                    # reject_reads_list.append(entry.name)
+                    # reject_reads_dict.update({entry.name: 'multicomp'})
+                    continue
+                # or matches to two incompatible motifs
+                if (len(matchesq1) == 1) and (len(matchesq2rc) == 1):
+                    countqqrc += 1
+                    # reject_reads_list.append(entry.name)
+                    # reject_reads_dict.update({entry.name: 'multicomp'})
+                    continue
+                if (len(matchesq2) == 1) and (len(matchesq1rc) == 1):
+                    countqqrc += 1
+                    # reject_reads_list.append(entry.name)
+                    # reject_reads_dict.update({entry.name: 'multicomp'})
+                    continue
+                # process motif match pairs to extract target sequences
+                if (len(matchesq1) == 1) and (len(matchesq2) == 1):
+                    countq1q2 += 1
+                    captured_seqstring = str(entry.sequence)[matchesq1[0].end:matchesq2[0].start]
+                    captured_qualstring = str(entry.quality)[matchesq1[0].end:matchesq2[0].start]
+                    if len(captured_qualstring) < 5:
+                        captured_qualstring = qual_char * len(captured_seqstring)
+
+                    if matchesq2[0].start <= matchesq1[0].end:
+                        wrongq2q1 += 1
+                        # reject_reads_list.append(entry.name)
+                        # reject_reads_dict.update({entry.name: 'ooorder'})
+                        continue
+
+                    if len(captured_seqstring) >= min_length:
+                        hit_q1_q2 += 1
+                        # print('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
+                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
+                        fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
+                            entry.comment) + '\n')  # make comment bam compatible
+                        fout.write(captured_seqstring[0:max_length] + '\n')
+                        fout.write('+' + '\n')
+                        fout.write(captured_qualstring[0:max_length] + '\n')
+                        continue
+                    else:
+                        hit_but_short_q1_q2 += 1
+                        # reject_reads_list.append(entry.name)
+                        # reject_reads_dict.update({entry.name: 'short'})
+                    continue
+                #            break
+                if (len(matchesq1rc) == 1) and (len(matchesq2rc) == 1):
+                    countq2rcq1rc += 1
+                    captured_seqstring = str(entry.sequence)[matchesq2rc[0].end:matchesq1rc[0].start]
+                    captured_qualstring = str(entry.quality)[matchesq2rc[0].end:matchesq1rc[0].start]
+                    if len(captured_qualstring) < 5:
+                        captured_qualstring = qual_char * len(captured_seqstring)
+
+                    if matchesq1rc[0].start <= matchesq2rc[0].end:
+                        wrongq1rcq2rc += 1
+                        # reject_reads_dict.update({entry.name: 'ooorder'})
+                    if len(captured_seqstring) >= min_length:
+                        hit_q2rc_q1rc += 1
+                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
+                        fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
+                            entry.comment) + '\n')  # make comment bam compatible
+                        fout.write(captured_seqstring[0:max_length] + '\n')
+                        fout.write('+' + '\n')
+                        fout.write(captured_qualstring[0:max_length] + '\n')
+                        continue
+                    else:
+                        hit_but_short_q2rc_q1rc += 1
+                        # reject_reads_list.append(entry.name)
+                        # reject_reads_dict.update({entry.name: 'short'})
+                    continue
+                # process single motif matches to extract target sequences
+                if len(matchesq1) == 1:
+                    countq1 += 1
+                    captured_seqstring = str(entry.sequence)[
+                                         matchesq1[0].end:]  # nothing after colon indicates end of string
+                    captured_qualstring = str(entry.quality)[
+                                          matchesq1[0].end:]
+                    if len(captured_qualstring) < 5:
+                        captured_qualstring = qual_char * len(captured_seqstring)
+
+                    if len(captured_seqstring) >= min_length:
+                        hit_q1_only += 1
+                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
+                        fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
+                            entry.comment) + '\n')  # make comment bam compatible
+                        fout.write(captured_seqstring[0:max_length] + '\n')
+                        fout.write('+' + '\n')
+                        fout.write(captured_qualstring[0:max_length] + '\n')
+                        continue
+                    else:
+                        hit_but_short_q1_only += 1
+                        # reject_reads_list.append(entry.name)
+                        # reject_reads_dict.update({entry.name: 'short'})
+                    continue
+                if len(matchesq2rc) == 1:
+                    countq2rc += 1
+                    captured_seqstring = str(entry.sequence)[
+                                         matchesq2rc[0].end:]  # nothing after colon indicates end of string
+                    captured_qualstring = str(entry.quality)[
+                                          matchesq2rc[0].end:]
+                    if len(captured_qualstring) < 5:
+                        captured_qualstring = qual_char * len(captured_seqstring)
+
+                    if len(captured_seqstring) >= min_length:
+                        hit_q2rc_only += 1
+                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
+                        fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
+                            entry.comment) + '\n')  # make comment bam compatible
+                        fout.write(captured_seqstring[0:max_length] + '\n')
+                        fout.write('+' + '\n')
+                        fout.write(captured_qualstring[0:max_length] + '\n')
+                        continue
+                    else:
+                        hit_but_short_q2rc_only += 1
+                        # reject_reads_list.append(entry.name)
+                        # reject_reads_dict.update({entry.name: 'short'})
+                    continue
+                if len(matchesq1rc) == 1:
+                    countq1rc += 1
+                    captured_seqstring = str(entry.sequence)[
+                                         0:matchesq1rc[0].start]  # nothing after colon indicates end of string
+                    captured_qualstring = str(entry.quality)[
+                                          0:matchesq1rc[0].start]
+                    if len(captured_qualstring) < 5:
+                        captured_qualstring = qual_char * len(captured_seqstring)
+
+                    if len(captured_seqstring) >= min_length:
+                        hit_q1rc_only += 1
+                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
+                        fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
+                            entry.comment) + '\n')  # make comment bam compatible
+                        fout.write(captured_seqstring[-max_length:].translate(trans)[::-1] + '\n')
+                        fout.write('+' + '\n')
+                        fout.write(captured_qualstring[-max_length:][::-1] + '\n')
+                        continue
+                    else:
+                        hit_but_short_q1rc_only += 1
+                        # reject_reads_list.append(entry.name)
+                        # reject_reads_dict.update({entry.name: 'short'})
+                    continue
+                if len(matchesq2) == 1:
+                    countq2 += 1
+                    captured_seqstring = str(entry.sequence)[
+                                         0:matchesq2[0].start]  # nothing after colon indicates end of string
+                    captured_qualstring = str(entry.quality)[
+                                          0:matchesq2[0].start]
+                    if len(captured_qualstring) < 5:
+                        captured_qualstring = qual_char * len(captured_seqstring)
+
+                    if len(captured_seqstring) >= min_length:
+                        hit_q2_only += 1
+                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
+                        fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
+                            entry.comment) + '\n')  # make comment bam compatible
+                        fout.write(captured_seqstring[-max_length:].translate(trans)[::-1] + '\n')
+                        fout.write('+' + '\n')
+                        fout.write(captured_qualstring[-max_length:][::-1] + '\n')
+                        continue
+                    else:
+                        hit_but_short_q2_only += 1
+                        # reject_reads_list.append(entry.name)
+                        # reject_reads_dict.update({entry.name: 'short'})
+                    continue
+
+    else:
+        with pysam.FastxFile(fq_filename, persist=False) as fin, open(fqout_filename, mode='wt') as fout:
+            print(fq_filename, '  ==>\n\t\t\t', fqout_filename, '\n')
+            for entry in fin:
+                count += 1
+
+                if not fuzzy_levenshtein:
+                    # print('find_near_matches \n')
+                    matchesq1 = find_near_matches(qry1, entry.sequence, max_substitutions=subs, max_deletions=dels,
+                                                  max_insertions=insrt)
+                    matchesq2 = find_near_matches(qry2, entry.sequence, max_substitutions=subs, max_deletions=dels,
+                                                  max_insertions=insrt)
+                    matchesq1rc = find_near_matches(qry1rc, entry.sequence, max_substitutions=subs, max_deletions=dels,
+                                                    max_insertions=insrt)
+                    matchesq2rc = find_near_matches(qry2rc, entry.sequence, max_substitutions=subs, max_deletions=dels,
+                                                    max_insertions=insrt)
+                else:
+                    # print('find_near_matches lev\n')
+                    matchesq1 = find_near_matches(qry1, entry.sequence, max_l_dist=l_dist)
+                    matchesq2 = find_near_matches(qry2, entry.sequence, max_l_dist=l_dist)
+                    matchesq1rc = find_near_matches(qry1rc, entry.sequence, max_l_dist=l_dist)
+                    matchesq2rc = find_near_matches(qry2rc, entry.sequence, max_l_dist=l_dist)
+
+                if not bool(matchesq1 + matchesq2 + matchesq1rc + matchesq2rc):
+                    # print(matchesq1 + matchesq2 + matchesq1rc + matchesq1rc)
+                    # reject_reads_dict.update({entry.name: 'nomatch'})
+                    continue
+                # skip fastq entry if multiple matches to same motif query seq
+                if len(matchesq1) > 1:
+                    countqmulti += 1
+                    # reject_reads_list.append(entry.name)
+                    # reject_reads_dict.update({entry.name: 'multi'})
+                    continue
+                if len(matchesq2) > 1:
+                    countqmulti += 1
+                    # reject_reads_list.append(entry.name)
+                    # reject_reads_dict.update({entry.name: 'multi'})
+                    continue
+                if len(matchesq1rc) > 1:
+                    countqmulti += 1
+                    # reject_reads_list.append(entry.name)
+                    # reject_reads_dict.update({entry.name: 'multi'})
+                    continue
+                if len(matchesq2rc) > 1:
+                    countqmulti += 1
+                    # reject_reads_list.append(entry.name)
+                    # reject_reads_dict.update({entry.name: 'multi'})
+                    continue
+                # skip fastq entry if multiple matches to same motif query direct and reverse complement
+
+                if (len(matchesq1) == 1) and (len(matchesq1rc) == 1):
+                    countqqrc += 1
+                    # reject_reads_list.append(entry.name)
+                    # reject_reads_dict.update({entry.name: 'multicomp'})
+                    continue
+                if (len(matchesq2) == 1) and (len(matchesq2rc) == 1):
+                    countqqrc += 1
+                    # reject_reads_list.append(entry.name)
+                    # reject_reads_dict.update({entry.name: 'multicomp'})
+                    continue
+                # or matches to two incompatible motifs
+                if (len(matchesq1) == 1) and (len(matchesq2rc) == 1):
+                    countqqrc += 1
+                    # reject_reads_list.append(entry.name)
+                    # reject_reads_dict.update({entry.name: 'multicomp'})
+                    continue
+                if (len(matchesq2) == 1) and (len(matchesq1rc) == 1):
+                    countqqrc += 1
+                    # reject_reads_list.append(entry.name)
+                    # reject_reads_dict.update({entry.name: 'multicomp'})
+                    continue
+                # process motif match pairs to extract target sequences
+                if (len(matchesq1) == 1) and (len(matchesq2) == 1):
+                    countq1q2 += 1
+                    captured_seqstring = str(entry.sequence)[matchesq1[0].end:matchesq2[0].start]
+                    captured_qualstring = str(entry.quality)[matchesq1[0].end:matchesq2[0].start]
+                    if matchesq2[0].start <= matchesq1[0].end:
+                        wrongq2q1 += 1
+                        # reject_reads_list.append(entry.name)
+                        # reject_reads_dict.update({entry.name: 'ooorder'})
+                        continue
+
+                    if len(captured_seqstring) >= min_length:
+                        hit_q1_q2 += 1
+                        # print('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
+                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
+                        fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
+                            entry.comment) + '\n')  # make comment bam compatible
+                        fout.write(captured_seqstring[0:max_length] + '\n')
+                        fout.write('+' + '\n')
+                        fout.write(captured_qualstring[0:max_length] + '\n')
+                        continue
+                    else:
+                        hit_but_short_q1_q2 += 1
+                        # reject_reads_list.append(entry.name)
+                        # reject_reads_dict.update({entry.name: 'short'})
+                    continue
+                #            break
+                if (len(matchesq1rc) == 1) and (len(matchesq2rc) == 1):
+                    countq2rcq1rc += 1
+                    captured_seqstring = str(entry.sequence)[matchesq2rc[0].end:matchesq1rc[0].start]
+                    captured_qualstring = str(entry.quality)[matchesq2rc[0].end:matchesq1rc[0].start]
+                    if matchesq1rc[0].start <= matchesq2rc[0].end:
+                        wrongq1rcq2rc += 1
+                        # reject_reads_dict.update({entry.name: 'ooorder'})
+                    if len(captured_seqstring) >= min_length:
+                        hit_q2rc_q1rc += 1
+                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
+                        fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
+                            entry.comment) + '\n')  # make comment bam compatible
+                        fout.write(captured_seqstring[0:max_length] + '\n')
+                        fout.write('+' + '\n')
+                        fout.write(captured_qualstring[0:max_length] + '\n')
+                        continue
+                    else:
+                        hit_but_short_q2rc_q1rc += 1
+                        # reject_reads_list.append(entry.name)
+                        # reject_reads_dict.update({entry.name: 'short'})
+                    continue
+                # process single motif matches to extract target sequences
+                if len(matchesq1) == 1:
+                    countq1 += 1
+                    captured_seqstring = str(entry.sequence)[
+                                         matchesq1[0].end:]  # nothing after colon indicates end of string
+                    captured_qualstring = str(entry.quality)[
+                                          matchesq1[0].end:]
+                    if len(captured_seqstring) >= min_length:
+                        hit_q1_only += 1
+                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
+                        fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
+                            entry.comment) + '\n')  # make comment bam compatible
+                        fout.write(captured_seqstring[0:max_length] + '\n')
+                        fout.write('+' + '\n')
+                        fout.write(captured_qualstring[0:max_length] + '\n')
+                        continue
+                    else:
+                        hit_but_short_q1_only += 1
+                        # reject_reads_list.append(entry.name)
+                        # reject_reads_dict.update({entry.name: 'short'})
+                    continue
+                if len(matchesq2rc) == 1:
+                    countq2rc += 1
+                    captured_seqstring = str(entry.sequence)[
+                                         matchesq2rc[0].end:]  # nothing after colon indicates end of string
+                    captured_qualstring = str(entry.quality)[
+                                          matchesq2rc[0].end:]
+                    if len(captured_seqstring) >= min_length:
+                        hit_q2rc_only += 1
+                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
+                        fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
+                            entry.comment) + '\n')  # make comment bam compatible
+                        fout.write(captured_seqstring[0:max_length] + '\n')
+                        fout.write('+' + '\n')
+                        fout.write(captured_qualstring[0:max_length] + '\n')
+                        continue
+                    else:
+                        hit_but_short_q2rc_only += 1
+                        # reject_reads_list.append(entry.name)
+                        # reject_reads_dict.update({entry.name: 'short'})
+                    continue
+                if len(matchesq1rc) == 1:
+                    countq1rc += 1
+                    captured_seqstring = str(entry.sequence)[
+                                         0:matchesq1rc[0].start]  # nothing after colon indicates end of string
+                    captured_qualstring = str(entry.quality)[
+                                          0:matchesq1rc[0].start]
+                    if len(captured_seqstring) >= min_length:
+                        hit_q1rc_only += 1
+                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
+                        fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
+                            entry.comment) + '\n')  # make comment bam compatible
+                        fout.write(captured_seqstring[-max_length:].translate(trans)[::-1] + '\n')
+                        fout.write('+' + '\n')
+                        fout.write(captured_qualstring[-max_length:][::-1] + '\n')
+                        continue
+                    else:
+                        hit_but_short_q1rc_only += 1
+                        # reject_reads_list.append(entry.name)
+                        # reject_reads_dict.update({entry.name: 'short'})
+                    continue
+                if len(matchesq2) == 1:
+                    countq2 += 1
+                    captured_seqstring = str(entry.sequence)[
+                                         0:matchesq2[0].start]  # nothing after colon indicates end of string
+                    captured_qualstring = str(entry.quality)[
+                                          0:matchesq2[0].start]
+                    if len(captured_seqstring) >= min_length:
+                        hit_q2_only += 1
+                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
+                        fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
+                            entry.comment) + '\n')  # make comment bam compatible
+                        fout.write(captured_seqstring[-max_length:].translate(trans)[::-1] + '\n')
+                        fout.write('+' + '\n')
+                        fout.write(captured_qualstring[-max_length:][::-1] + '\n')
+                        continue
+                    else:
+                        hit_but_short_q2_only += 1
+                        # reject_reads_list.append(entry.name)
+                        # reject_reads_dict.update({entry.name: 'short'})
+                    continue
+
+    # print("\n" + fq_filename + "  ->>\n" + fqout_filename + "#####################@@@@@@@@@@@@@@@@@@@@\n")
+
+    # print('#######################################################~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~log1\n')
     # very cryptic logging needs reorganising and fixing to work with multiprocessing
     # note added random int  to get almost unique log file names need to find fix
     log_file = open(
@@ -530,6 +737,7 @@ def pimms_fastq(fq_filename, fqout_filename, out_dir_logs, nano):
     )
 
     try:
+        # print(fq_filename, fqout_filename, 'logfail2\n')
         log_file.write(
             f'fq_filename\tread count:\tmultiple copies of a motif:\tmismatched motifs:\tboth motifs (fwd|revcomp):\t'
             'both motifs (fwd|revcomp) >= {min_length}:\tsingle motif  >= {min_length}:\ttotal passed\n')
@@ -548,6 +756,7 @@ def pimms_fastq(fq_filename, fqout_filename, out_dir_logs, nano):
     finally:
         # Close the files!
         log_file.close()
+
 
 
 # def survey_fastq(resultx_reads_list, resultx_reads_dict, fqout):
@@ -1347,17 +1556,19 @@ def find_flank_func(parsed_args_ff):
         # parsed_args[0].noreps = True
         fuzzy_levenshtein = True
         l_dist = parsed_args_ff[0].lev[0]  # maximum Levenshtein Distance
-        min_length = 50
-        max_length = 200
-        print('overriding with Nanopore appropriate settings: Levenshtein distance of ' + str(
-            l_dist) + ' + sequence length min = ' + str(min_length) + ', max = ' + str(max_length))
+        # min_length = 50
+        # max_length = 200
+        min_length = parsed_args_ff[0].min[0]  # changed to array
+        max_length = parsed_args_ff[0].max[0]  # changed to array
+    # print('overriding with Nanopore appropriate settings: Levenshtein distance of ' + str(
+    #    l_dist) + ' + sequence length min = ' + str(min_length) + ', max = ' + str(max_length))
     else:
         subs = parsed_args_ff[0].sub[0]
         l_dist = parsed_args_ff[0].lev[0]  # maximum Levenshtein Distance
         insrt = parsed_args_ff[0].insert[0]
         dels = parsed_args_ff[0].deletion[0]
-        min_length = parsed_args_ff[0].min
-        max_length = parsed_args_ff[0].max
+        min_length = parsed_args_ff[0].min[0]  # changed to array
+        max_length = parsed_args_ff[0].max[0]  # changed to array
 
     # set up some names
     if nano:
@@ -1383,8 +1594,8 @@ def find_flank_func(parsed_args_ff):
 
         glob_wc = ["*q.gz", "*.fastq", "*.fasta", "*.fasta.gz"]
         glob_read_files = find_read_files_with_glob(fastq_dir, glob_wc)
-        print(glob_read_files, "...\n")
-        print("nanopore PIMMS filtering starting...\n")
+        print(glob_read_files, "...(glob_read_files)...\n")
+        print("nanopore PIMMS read filtering starting...\n")
         print(datetime.datetime.now())
 
         pi = multiprocessing.Pool(ncpus)
@@ -1419,7 +1630,7 @@ def find_flank_func(parsed_args_ff):
         glob_wc = ["*q.gz", "*.fastq"]
         glob_read_files = find_read_files_with_glob(fastq_dir, glob_wc)
 
-        print("PIMMS read filtering starting...\n")
+        print("PIMMS read filtering starting...(nano == False 1423)\n")
         print(datetime.datetime.now())
         pi = multiprocessing.Pool(ncpus)
         # for fq in glob.glob(fastq_dir + "*.fastq"):
