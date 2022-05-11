@@ -20,7 +20,7 @@
 
     $ python ./pimms2.py find_flank -c pimms2.config --fasta <name>.fasta --mapper bwa --min 20 --max 50 --in_dir <name> --out_dir <name> --label test  
 
-    $ python ./pimms2.py sam_extract -c pimms2.config --sam test/<name>_test_pimms2out_trim50_sub1_bwa.sam --label test --mismatch 0 --min_depth 1 --gff <name>.gff3  
+    $ python ./pimms2.py bam_extract -c pimms2.config --sam test/<name>_test_pimms2out_trim50_sub1_bwa.bam --label test --mismatch 0 --min_depth 1 --gff <name>.gff3  
 
 
 ### Options and Usage
@@ -50,17 +50,17 @@
     --motif2 MOTIF2       IS end reference motif2 [e.g. pGh9:GGTTCTGTTGCAAAGTTTAAAAA]  
     --label condition     Text tag to add to results file  
 
-    python ./pimms2.py sam_extract -h  
+    python ./pimms2.py bam_extract -h  
     
     Arguments:  
     -h, --help            show this help message and exit  
     -c --config           pimms2.config use parameters from config file  
-    --sam pimms.sam/bam   sam/bam file of mapped IS flanking sequences  
+    --bam pimms.bam/sam   bam/sam file of mapped IS flanking sequences  
     --label condition     text tag to add to results file  
     --mismatch float      fraction of permitted mismatches in mapped read ( 0 <= float < 0.2 [no filter]  
     --min_depth int       minimum read depth at insertion site >= int [2]  
     --gff genome.gff      GFF3 formatted file to use (note fasta sequence present in the file must be deleted before use)  
     --gff_extra 'x,y,z'   comma separated list of extra fields to include from the GFF3 annotation e.g. 'ID,translation,note'  
     --gff_force           override GFF/BAM seq id discrepancies e.g. use when the gff has a plasmid not present in the reference sequence or vice-versa  
-
+	--out_fmt			  xlsx, tsv, csv
 
