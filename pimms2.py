@@ -104,7 +104,7 @@ def extant_file(x):
 
 def prog_in_path_check(prog_to_check):
     if shutil.which(prog_to_check):
-        print(prog_to_check + ' is in the path :-)')
+        print('required mapper is in the path : ' + prog_to_check)
     else:
         sys.exit('\nERROR: ' + prog_to_check +
                  ' cannot be found in the path. \nSYS.EXIT: Please check your environment and ensure ' + prog_to_check +
@@ -253,7 +253,7 @@ def pimms_fastq(fq_filename, fqout_filename, out_dir_logs, nano):
     # if parsed_args[0].nano:  # nano == True
     if nano:  # nano == True
         # parsed_args[0].noreps = True
-        print('nano == True\n')
+        # print('nano == True\n')
         fuzzy_levenshtein = True
         l_dist = parsed_args[0].lev[0]  # maximum Levenshtein Distance
         # min_length = 50
@@ -264,7 +264,7 @@ def pimms_fastq(fq_filename, fqout_filename, out_dir_logs, nano):
         # print('overriding with Nanopore appropriate settings: Levenshtein distance of ' + str(
         #   l_dist) + ' + sequence length min = ' + str(min_length) + ', max = ' + str(max_length))
     else:
-        print('nano == False\n')
+        # print('nano == False\n')
         # fuzzy_levenshtein = False
         subs = parsed_args[0].sub[0]
         l_dist = parsed_args[0].lev[0]  # maximum Levenstein Distance
@@ -1178,7 +1178,7 @@ def parse_arguments():
         epilog="\n\n*** N.B. This is a development version ***\n \n ",
         description='''description here'''
     )
-    ap.add_argument('-v', '--version', action='version', version='%(prog)s 2.0.7 demo')
+    ap.add_argument('-v', '--version', action='version', version='%(prog)s 2.1 demo')
 
     modes = ap.add_subparsers(parser_class=configargparse.ArgParser, dest='command')
 
@@ -1213,8 +1213,8 @@ def parse_arguments():
                            help="do not run mapping step")
     findflank.add_argument("--mapper", required=False, nargs='?', type=str, default='bwa', choices=['minimap2', 'bwa'],
                            help="select mapping software from available options")
-    # findflank.add_argument("--rmfiles", required=False, action='store_true', default=False,
-    #                       help="remove intermediate files")
+    findflank.add_argument("--single", required=False, action='store_true', default=False,
+                           help="only single direction Illumina data provided")
     findflank.add_argument("--keep", required=False, action='store_true', default=False,
                            help="keep intermediate fastq files etc for diagnostic purposes")
     findflank.add_argument("--lev", required=False, nargs=1, type=int, default=0,
@@ -1297,6 +1297,8 @@ def parse_arguments():
                              help="do not run mapping step")
     fullprocess.add_argument("--mapper", required=False, nargs='?', type=str, default='bwa', choices=['minimap2', 'bwa'],
                              help="select mapping software from available options")
+    fullprocess.add_argument("--single", required=False, action='store_true', default=False,
+                             help="only single direction Illumina data provided")
     fullprocess.add_argument("--keep", required=False, action='store_true', default=False,
                              help="keep intermediate files for diagnostic purposes")
     fullprocess.add_argument("--lev", required=False, nargs=1, type=int, default=0,
@@ -1356,10 +1358,12 @@ def parse_arguments():
 
     local_parsed_args = ap.parse_known_args()
     print("-----------------")
+    ap.print_values()
+    print("-----------------")
+    # print(ap.format_values())
     print(local_parsed_args)
     print("-----------------")
-    print(ap.format_values())
-    print("-----------------")
+    #
 
     # exit and print short help message if no mode/arguments supplied
     if len(sys.argv) <= 2:
@@ -1375,7 +1379,7 @@ def parse_arguments():
             elif not local_parsed_args[0].label:
                 ap.error("unless the --nomap flag is used please supply a text label string  --label cond_01")
             else:
-                print("refseq provided: " + local_parsed_args[0].fasta[0])
+                print("reference seq file provided: " + local_parsed_args[0].fasta[0])
 
     # print("##########")
     # print(ap.format_values())  # useful for logging where different settings came from
@@ -1630,16 +1634,24 @@ def find_flank_func(parsed_args_ff):
         glob_wc = ["*q.gz", "*.fastq"]
         glob_read_files = find_read_files_with_glob(fastq_dir, glob_wc)
 
-        print("PIMMS read filtering starting...(nano == False 1423)\n")
+        print("PIMMS read filtering starting...\n")
         print(datetime.datetime.now())
         pi = multiprocessing.Pool(ncpus)
         # for fq in glob.glob(fastq_dir + "*.fastq"):
+
         for fq in glob_read_files:
-            if not (fwdrev_wc[0] in fq or fwdrev_wc[1] in fq):
-                print("ERROR(fastq): text substrings " + fwdrev_wc[0] + "/" + fwdrev_wc[
-                    1] + " NOT FOUND in read filenanes (to identify illumina fwd/rev fastq files)")
-                print("ERROR(fastq): Check the fastq file names and/or update the --fwdrev parameter")
-                sys.exit(1)
+            if not parsed_args_ff[0].single:
+                # print('fwd/rev Illumina data')
+                if not (fwdrev_wc[0] in fq or fwdrev_wc[1] in fq):
+                    print("ERROR(fastq): text substrings " + fwdrev_wc[0] + "/" + fwdrev_wc[
+                        1] + " NOT FOUND in read filenanes (to identify illumina fwd/rev fastq files)")
+                    print("ERROR(fastq): Check the fastq file names and/or update the --fwdrev parameter")
+                    sys.exit(1)
+            else:
+                print('.')
+                # print('single direction Illumina data')
+
+            # sys.exit(1)
             fq_processed = os.path.join(out_dir_ff, Path(Path(fq).stem).stem + fq_result_suffix)
             pi.apply_async(pimms_fastq,
                            args=(fq, fq_processed, out_dir_logs, nano)
@@ -1667,56 +1679,62 @@ def find_flank_func(parsed_args_ff):
         print(datetime.datetime.now())
 
         # match fwdrev match substrings e.g: _R1_/_R2_ --fwdrev parameter
-        fqp_results_fwd = sorted(glob.glob(os.path.join(out_dir_ff, "*" + fwdrev_wc[0] + "*" + fq_result_suffix)))
-        fqp_results_rev = sorted(glob.glob(os.path.join(out_dir_ff, "*" + fwdrev_wc[1] + "*" + fq_result_suffix)))
-        print(fqp_results_fwd)
-        print(fqp_results_rev)
-        #
+        if not parsed_args_ff[0].single:
 
-        for fwd_fqp_result, rev_fqp_result in zip(fqp_results_fwd, fqp_results_rev):
-            result1_reads_list = []
-            result2_reads_list = []
-            print(fwd_fqp_result)
-            print(rev_fqp_result)
-            survey_fastq(result1_reads_list, fwd_fqp_result)
-            survey_fastq(result2_reads_list, rev_fqp_result)
-            a = set(result1_reads_list)
-            b = set(result2_reads_list)
-            c = b.difference(a)
+            fqp_results_fwd = sorted(glob.glob(os.path.join(out_dir_ff, "*" + fwdrev_wc[0] + "*" + fq_result_suffix)))
+            fqp_results_rev = sorted(glob.glob(os.path.join(out_dir_ff, "*" + fwdrev_wc[1] + "*" + fq_result_suffix)))
+            print(fqp_results_fwd)
+            print(fqp_results_rev)
+            for fwd_fqp_result, rev_fqp_result in zip(fqp_results_fwd, fqp_results_rev):
+                result1_reads_list = []
+                result2_reads_list = []
+                print(fwd_fqp_result)
+                print(rev_fqp_result)
+                survey_fastq(result1_reads_list, fwd_fqp_result)
+                survey_fastq(result2_reads_list, rev_fqp_result)
+                a = set(result1_reads_list)
+                b = set(result2_reads_list)
+                c = b.difference(a)
 
-            tempfqname = Path(fwd_fqp_result).name
-            # fix so only substring in file name nit dir is updated
-            mrg_fqp_result_filename = os.path.join(Path(fwd_fqp_result).parent,
-                                                   re.sub(fwdrev_wc[0], '_RX_', tempfqname,
-                                                          count=1))  # replace  fwd substring '_R1_'
-            # mrg_fqp_result_filename = re.sub(fwdrev_wc[0], '_RX_', fwd_fqp_result, count=1)
-            flanking_fastq_result_list = flanking_fastq_result_list + [mrg_fqp_result_filename]
-            print(mrg_fqp_result_filename)
-            print(str(len(a)))
-            print(str(len(b)))
-            print(str(len(c)))
-            # pysam bug doesn't parse files gzipped in chunks so gzipping removed here
-            # with pysam.FastxFile(fwd_fqp_result) as fin, gzip.open(mrg_fqp_result_filename, mode='wt') as fout:
-            with pysam.FastxFile(fwd_fqp_result, persist=False) as fin, open(mrg_fqp_result_filename,
-                                                                             mode='wt') as fout:
-                for entry in fin:
-                    fout.write((str(entry) + '\n'))
-
-            # with pysam.FastxFile(rev_fqp_result) as fin, gzip.open(mrg_fqp_result_filename, mode='at') as fout:
-            with pysam.FastxFile(rev_fqp_result, persist=False) as fin, open(mrg_fqp_result_filename,
-                                                                             mode='at') as fout:
-                for entry in fin:
-                    if entry.name in c:
+                tempfqname = Path(fwd_fqp_result).name
+                # fix so only substring in file name nit dir is updated
+                mrg_fqp_result_filename = os.path.join(Path(fwd_fqp_result).parent,
+                                                       re.sub(fwdrev_wc[0], '_RX_', tempfqname,
+                                                              count=1))  # replace  fwd substring '_R1_'
+                # mrg_fqp_result_filename = re.sub(fwdrev_wc[0], '_RX_', fwd_fqp_result, count=1)
+                flanking_fastq_result_list = flanking_fastq_result_list + [mrg_fqp_result_filename]
+                print(mrg_fqp_result_filename)
+                print(str(len(a)))
+                print(str(len(b)))
+                print(str(len(c)))
+                # pysam bug doesn't parse files gzipped in chunks so gzipping removed here
+                # with pysam.FastxFile(fwd_fqp_result) as fin, gzip.open(mrg_fqp_result_filename, mode='wt') as fout:
+                with pysam.FastxFile(fwd_fqp_result, persist=False) as fin, open(mrg_fqp_result_filename,
+                                                                                 mode='wt') as fout:
+                    for entry in fin:
                         fout.write((str(entry) + '\n'))
-                        # fout.write(str(entry) + '\n')
 
-        # remove intermediate fastq files
-        # if parsed_args[0].rmfiles:
-        if not parsed_args_ff[0].keep:
-            delete_file_list(fqp_results_fwd)
-            delete_file_list(fqp_results_rev)
+                # with pysam.FastxFile(rev_fqp_result) as fin, gzip.open(mrg_fqp_result_filename, mode='at') as fout:
+                with pysam.FastxFile(rev_fqp_result, persist=False) as fin, open(mrg_fqp_result_filename,
+                                                                                 mode='at') as fout:
+                    for entry in fin:
+                        if entry.name in c:
+                            fout.write((str(entry) + '\n'))
+                            # fout.write(str(entry) + '\n')
 
-        print("illumina merge of fwd/reverse data  completed...\n")
+            # remove intermediate fastq files
+            # if parsed_args[0].rmfiles:
+            if not parsed_args_ff[0].keep:
+                delete_file_list(fqp_results_fwd)
+                delete_file_list(fqp_results_rev)
+            print("illumina merge of fwd/reverse data  completed...\n")
+
+        else:
+            fqp_results_sing = sorted(glob.glob(os.path.join(out_dir_ff, "*" + fq_result_suffix)))
+            print(fqp_results_sing)
+            flanking_fastq_result_list = fqp_results_sing
+        #  if not parsed_args_ff[0].keep:
+        #      delete_file_list(fqp_results_sing)
 
     # tidy up
     print(flanking_fastq_result_list)
