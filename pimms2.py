@@ -186,7 +186,7 @@ def run_minimap2(flanking_fastq_concat_result, sam_output_result, genome_fasta):
 
 def run_bwa(flanking_fastq_concat_result, sam_output_result, genome_fasta, ncpus):
     bwa_index_dir = Path(genome_fasta).stem + '_index'
-    if not os.path.exists(os.path.join(bwa_index_dir, genome_fasta + '.sa')):
+    if not os.path.exists(os.path.join(bwa_index_dir, Path(genome_fasta).name + '.sa')):
         print('Creating BWA index...')
         create_folder(bwa_index_dir)
         fasta_to_index = os.path.join(bwa_index_dir, Path(genome_fasta).name)
@@ -208,7 +208,7 @@ def run_bwa(flanking_fastq_concat_result, sam_output_result, genome_fasta, ncpus
         ['bwa', 'mem',
          '-t', str(ncpus), "-C",
          '-o', sam_output_result,
-         os.path.join(bwa_index_dir, genome_fasta),
+         os.path.join(bwa_index_dir, Path(genome_fasta).name),
          flanking_fastq_concat_result],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE)
@@ -261,8 +261,8 @@ def pimms_fastq(fq_filename, fqout_filename, out_dir_logs, nano):
         min_length = parsed_args[0].min[0]
         max_length = parsed_args[0].max[0]
         qual_char = parsed_args[0].qual_char
-        # print('overriding with Nanopore appropriate settings: Levenshtein distance of ' + str(
-        #   l_dist) + ' + sequence length min = ' + str(min_length) + ', max = ' + str(max_length))
+        print('Nanopore appropriate settings: Levenshtein distance of ' + str(l_dist)
+              + ' + sequence length min = ' + str(min_length) + ', max = ' + str(max_length))
     else:
         # print('nano == False\n')
         # fuzzy_levenshtein = False
@@ -273,8 +273,9 @@ def pimms_fastq(fq_filename, fqout_filename, out_dir_logs, nano):
         dels = parsed_args[0].deletion[0]
         min_length = parsed_args[0].min[0]
         max_length = parsed_args[0].max[0]
-    # print('standard settings\n')
-
+        # print('standard settings\n')
+        print('illumina settings: Levenshtein distance of ' + str(l_dist)
+              + ' + sequence length min = ' + str(min_length) + ', max = ' + str(max_length))
 
 
     count = 0
@@ -1057,6 +1058,8 @@ def coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, cond
     median_between_insertion_gap = coord_counts_df['between_insertion_gap'].median()
     mean_between_insertion_gap = round(coord_counts_df['between_insertion_gap'].mean(), 2)
 
+    # attr_to_columns.to_csv("attr_to_columns" + ".txt", index=False, sep='\t', header=True)
+
     sqlcode = '''
         select coord_counts_df.*
         ,attr_to_columns.*
@@ -1069,6 +1072,7 @@ def coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, cond
     # this line should allow multi contig files
 
     coords_join_gff = ps.sqldf(sqlcode, locals())
+
 
     # debugging save of intermediate data
     # coords_join_gff.to_csv("pimms_coords_join_gffstuff" + condition_label + ".txt", index=False, sep='\t', header=False)
@@ -1099,7 +1103,7 @@ def coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, cond
     ).reset_index()
 
     # test diagnostic files
-    # pimms_result_table.to_csv("pimms_coords_join_prt1_" + condition_label + ".txt", index=False, sep='\t', header=True)
+    #pimms_result_table.to_csv("pimms_coords_join_prt1_" + condition_label + ".txt", index=False, sep='\t', header=True)
 
     pimms_result_table = pimms_result_table.assign(num_insert_sites_per_feat_per_kb=(
             (pimms_result_table.num_insert_sites_per_feat / pimms_result_table.feat_length) * 1000),
@@ -1217,13 +1221,13 @@ def parse_arguments():
                            help="only single direction Illumina data provided")
     findflank.add_argument("--keep", required=False, action='store_true', default=False,
                            help="keep intermediate fastq files etc for diagnostic purposes")
-    findflank.add_argument("--lev", required=False, nargs=1, type=int, default=0,
-                           help="use Levenshtein distance (combined insert|del|sub score)")
-    findflank.add_argument("--sub", required=False, nargs=1, type=int, default=1,
+    findflank.add_argument("--lev", required=False, nargs=1, type=int, default=[0],
+                           help="use Levenshtein distance (combined insert|del|sub score) [0]")
+    findflank.add_argument("--sub", required=False, nargs=1, type=int, default=[1],
                            help="number of permitted base substitutions in motif match [1]")
-    findflank.add_argument("--insert", required=False, nargs=1, type=int, default=0,
+    findflank.add_argument("--insert", required=False, nargs=1, type=int, default=[0],
                            help="number of permitted base insertions in motif match [0]")
-    findflank.add_argument("--del", required=False, nargs=1, type=int, default=0, dest='deletion',
+    findflank.add_argument("--del", required=False, nargs=1, type=int, default=[0], dest='deletion',
                            help="number of permitted base insertions in motif match [0]")
     findflank.add_argument("--in_dir", required=True, nargs=1, dest='in_dir', type=extant_file,
                            help="directory containing input fastq files (assumed to match '*q.gz' or '*.fastq')")
@@ -1235,10 +1239,10 @@ def parse_arguments():
     findflank.add_argument("--cpus", required=False, nargs=1, type=int,  # default=[4],
                            default=[int(os.cpu_count() / 2)],
                            help="number of processors to use [(os.cpu_count() / 2)] ")
-    findflank.add_argument("--max", required=False, nargs=1, type=int, default=60,
-                           help="clip results to this length [illumina:60/nano:100]")
-    findflank.add_argument("--min", required=False, nargs=1, type=int, default=25,
-                           help="minimum read length [illumina:60/nano:100]")
+    findflank.add_argument("--max", required=False, nargs=1, type=int, default=[60],
+                           help="clip results to this length [60]")
+    findflank.add_argument("--min", required=False, nargs=1, type=int, default=[25],
+                           help="minimum read length [25]")
     findflank.add_argument("--motif1", required=False, nargs=1, type=str, default=['TCAGAAAACTTTGCAACAGAACC'],
                            # revcomp: GGTTCTGTTGCAAAGTTTTCTGA
                            help="IS end reference motif1 [TCAGAAAACTTTGCAACAGAACC](pGh9)")
@@ -1261,7 +1265,7 @@ def parse_arguments():
     samcoords.add_argument("--mismatch", required=False, nargs=1, type=float, metavar='float', default=[None],
                            choices=[round(x * 0.01, 2) for x in range(0, 21)],
                            help="fraction of permitted mismatches in mapped read ( 0 <= mismatch < 0.2) [no filter]")
-    samcoords.add_argument("--min_depth", required=False, nargs=1, type=int, default=2, metavar='int',
+    samcoords.add_argument("--min_depth", required=False, nargs=1, type=int, default=[2], metavar='int',
                            help="minimum read depth at insertion site >= int [2]")
     samcoords.add_argument("--noreps", required=False, action='store_true', default=False,
                            help="do not separate illumina read groups as replicate insertion count columns")
@@ -1301,13 +1305,13 @@ def parse_arguments():
                              help="only single direction Illumina data provided")
     fullprocess.add_argument("--keep", required=False, action='store_true', default=False,
                              help="keep intermediate files for diagnostic purposes")
-    fullprocess.add_argument("--lev", required=False, nargs=1, type=int, default=0,
+    fullprocess.add_argument("--lev", required=False, nargs=1, type=int, default=[0],
                              help="use Levenshtein distance (combined insert|del|sub score)")
-    fullprocess.add_argument("--sub", required=False, nargs=1, type=int, default=1,
+    fullprocess.add_argument("--sub", required=False, nargs=1, type=int, default=[1],
                              help="number of permitted base substitutions in motif match [1]")
-    fullprocess.add_argument("--insert", required=False, nargs=1, type=int, default=0,
+    fullprocess.add_argument("--insert", required=False, nargs=1, type=int, default=[0],
                              help="number of permitted base insertions in motif match [0]")
-    fullprocess.add_argument("--del", required=False, nargs=1, type=int, default=0, dest='deletion',
+    fullprocess.add_argument("--del", required=False, nargs=1, type=int, default=[0], dest='deletion',
                              help="number of permitted base insertions in motif match [0]")
     fullprocess.add_argument("--in_dir", required=True, nargs=1, dest='in_dir', type=extant_file,
                              help="directory containing input fastq files (assumed to match '*q.gz' or '*.fastq')")
@@ -1319,10 +1323,10 @@ def parse_arguments():
     fullprocess.add_argument("--cpus", required=False, nargs=1, type=int,  # default=int(4),
                              default=[int(os.cpu_count() / 2)],
                              help="number of processors to use [(os.cpu_count() / 2)] ")
-    fullprocess.add_argument("--max", required=True, nargs=1, type=int, default=60,
-                             help="clip results to this length [illumina:60/nano:100]")
-    fullprocess.add_argument("--min", required=True, nargs=1, type=int, default=25,
-                             help="minimum read length [illumina:60/nano:100]")
+    fullprocess.add_argument("--max", required=False, nargs=1, type=int, default=[60],
+                             help="clip results to this length [60]")
+    fullprocess.add_argument("--min", required=False, nargs=1, type=int, default=[25],
+                             help="minimum read length [25]")
     fullprocess.add_argument("--motif1", required=False, nargs=1, type=str, default=['TCAGAAAACTTTGCAACAGAACC'],
                              # revcomp: GGTTCTGTTGCAAAGTTTTCTGA
                              help="IS end reference motif1 [TCAGAAAACTTTGCAACAGAACC](pGh9)")
@@ -1341,7 +1345,7 @@ def parse_arguments():
     fullprocess.add_argument("--mismatch", required=False, nargs=1, type=float, metavar='float', default=[None],
                              choices=[round(x * 0.01, 2) for x in range(0, 21)],
                              help="fraction of permitted mismatches in mapped read ( 0 <= mismatch < 0.2) [no filter]")
-    fullprocess.add_argument("--min_depth", required=False, nargs=1, type=int, default=2, metavar='int',
+    fullprocess.add_argument("--min_depth", required=False, nargs=1, type=int, default=[2], metavar='int',
                              help="minimum read depth at insertion site >= int [2]")
     fullprocess.add_argument("--noreps", required=False, action='store_true', default=False,
                              help="do not separate illumina read groups as replicate insertion count columns")
@@ -1535,6 +1539,9 @@ def find_flank_func(parsed_args_ff):
         create_folder(out_dir_ff)
 
     out_dir_logs = os.path.join(out_dir_ff, 'logs')
+    if os.path.isdir(out_dir_logs):  # remove logs from previous runs
+        shutil.rmtree(out_dir_logs)
+
     create_folder(out_dir_logs)
 
     fwdrev_wc = parsed_args_ff[0].fwdrev[0].strip("'\"").split(',')
@@ -1543,18 +1550,19 @@ def find_flank_func(parsed_args_ff):
 
     # print(pimms_mls)
     # dir(parsed_args[0].cpus[0])
-    print('ncpus=' + str(parsed_args_ff[0].cpus[0]))
+
     # sys.exit(1)
     ncpus = int(parsed_args_ff[0].cpus[0])
-
+    print('ncpus=' + str(ncpus))
     nano = parsed_args_ff[0].nano
 
     # experimental decontaminate transposon/vector sequence
     # not currently effective try another implementation when time allows?
     # decontam_tranposon = False
     #  print(parsed_args_ff[0].sub[0])
-    fuzzy_levenshtein = bool(parsed_args_ff[0].lev[0])
-
+    # fuzzy_levenshtein = bool(parsed_args_ff[0].lev[0])
+    # l_dist = parsed_args_ff[0].lev[0]  # maximum Levenstein Distance
+    # fuzzy_levenshtein = bool(l_dist)
     # set up some variables:
     if nano:  # nano == True
         # parsed_args[0].noreps = True
@@ -1567,8 +1575,11 @@ def find_flank_func(parsed_args_ff):
     # print('overriding with Nanopore appropriate settings: Levenshtein distance of ' + str(
     #    l_dist) + ' + sequence length min = ' + str(min_length) + ', max = ' + str(max_length))
     else:
-        subs = parsed_args_ff[0].sub[0]
+
         l_dist = parsed_args_ff[0].lev[0]  # maximum Levenshtein Distance
+        print(str(l_dist) + '~~~~~~~~~~~~')
+        fuzzy_levenshtein = bool(l_dist)
+        subs = parsed_args_ff[0].sub[0]
         insrt = parsed_args_ff[0].insert[0]
         dels = parsed_args_ff[0].deletion[0]
         min_length = parsed_args_ff[0].min[0]  # changed to array
@@ -1750,14 +1761,14 @@ def find_flank_func(parsed_args_ff):
         print("Skipping mapping step...\n")
     else:
         if mapper == 'minimap2' or nano:
-            sam_output_mm = os.path.splitext(parsed_args_ff[0].fasta[0])[0] + '_' + label + re.sub('.sam', '_mm2.sam',
-                                                                                                   sam_result_suffix)
+            sam_output_mm = os.path.splitext(os.path.basename(parsed_args_ff[0].fasta[0]))[0] + '_' + label + re.sub('.sam', '_mm2.sam',
+                                                                                                                     sam_result_suffix)
             sam_output_mm = os.path.join(out_dir_ff, sam_output_mm)
             run_minimap2(concat_result_fastq, sam_output_mm, parsed_args_ff[0].fasta[0])
             bam_name_ff = py_sam_to_bam(sam_output_mm)
         elif mapper == 'bwa':
-            sam_output_bwa = os.path.splitext(parsed_args_ff[0].fasta[0])[0] + '_' + label + re.sub('.sam', '_bwa.sam',
-                                                                                                    sam_result_suffix)
+            sam_output_bwa = os.path.splitext(os.path.basename(parsed_args_ff[0].fasta[0]))[0] + '_' + label + re.sub('.sam', '_bwa.sam',
+                                                                                                                      sam_result_suffix)
             sam_output_bwa = os.path.join(out_dir_ff, sam_output_bwa)
             run_bwa(concat_result_fastq, sam_output_bwa, parsed_args_ff[0].fasta[0], ncpus)
             bam_name_ff = py_sam_to_bam(sam_output_bwa)
