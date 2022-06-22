@@ -948,9 +948,94 @@ def coordinates_to_features_reps(sam_stem, attr_to_columns, condition_label):
 
     if (len(read_comments) > 20):
         print(
-            "Warning: Unable to resolve different samples in fastq/sam/bam data (apparently too many?), continuing without replicate insertion counts" +
-            "\nNote: This may be due to old style Illumina header lines" +
-            "\n      if this is an error the software will need updating to recognise different fastq header formatting conventions\n")
+
+        < a
+
+        class ="list-group-item list-group-item-action" id="gallery_figure5_5_list_AphE4dbivsAphE4dai" data-toggle="list" href="#gallery_figure5_5_pane_AphE4dbivsAphE4dai" role="tab" aria-controls="AphE4dbivsAphE4dai" > AphE4dbivsAphE4dai < / a >
+
+        < a
+
+        class ="list-group-item list-group-item-action" id="gallery_figure5_5_list_AphL4daivsAphE4dai" data-toggle="list" href="#gallery_figure5_5_pane_AphL4daivsAphE4dai" role="tab" aria-controls="AphL4daivsAphE4dai" > AphL4daivsAphE4dai < / a >
+
+        < a
+
+        class ="list-group-item list-group-item-action" id="gallery_figure5_5_list_AphL4dbivsAphL4dai" data-toggle="list" href="#gallery_figure5_5_pane_AphL4dbivsAphL4dai" role="tab" aria-controls="AphL4dbivsAphL4dai" > AphL4dbivsAphL4dai < / a >
+
+        < a
+
+        class ="list-group-item list-group-item-action" id="gallery_figure5_5_list_FgAphvsAphE" data-toggle="list" href="#gallery_figure5_5_pane_FgAphvsAphE" role="tab" aria-controls="FgAphvsAphE" > FgAphvsAphE < / a >
+
+        < a
+
+        class ="list-group-item list-group-item-action" id="gallery_figure5_5_list_Fg_onlyvsMock" data-toggle="list" href="#gallery_figure5_5_pane_Fg_onlyvsMock" role="tab" aria-controls="Fg_onlyvsMock" > Fg_onlyvsMock < / a >
+
+        < a
+
+        class ="list-group-item list-group-item-action" id="gallery_figure5_5_list_AphLvsMock" data-toggle="list" href="#gallery_figure5_5_pane_AphLvsMock" role="tab" aria-controls="AphLvsMock" > AphLvsMock < / a >
+
+        < a
+
+        class ="list-group-item list-group-item-action" id="gallery_figure5_5_list_AphEvsMock" data-toggle="list" href="#gallery_figure5_5_pane_AphEvsMock" role="tab" aria-controls="AphEvsMock" > AphEvsMock < / a >
+
+        < a
+
+        class ="list-group-item list-group-item-action" id="gallery_figure5_5_list_AphE4daivsMock" data-toggle="list" href="#gallery_figure5_5_pane_AphE4daivsMock" role="tab" aria-controls="AphE4daivsMock" > AphE4daivsMock < / a >
+
+        < a
+
+        class ="list-group-item list-group-item-action" id="gallery_figure5_5_list_AphL4daivsMock" data-toggle="list" href="#gallery_figure5_5_pane_AphL4daivsMock" role="tab" aria-controls="AphL4daivsMock" > AphL4daivsMock < / a >
+
+        < a
+
+        class ="list-group-item list-group-item-action" id="gallery_figure5_5_list_AphE4dbivsMock" data-toggle="list" href="#gallery_figure5_5_pane_AphE4dbivsMock" role="tab" aria-controls="AphE4dbivsMock" > AphE4dbivsMock < / a >
+
+        < a
+
+        class ="list-group-item list-group-item-action" id="gallery_figure5_5_list_AphL4dbivsMock" data-toggle="list" href="#gallery_figure5_5_pane_AphL4dbivsMock" role="tab" aria-controls="AphL4dbivsMock" > AphL4dbivsMock < / a >
+
+        < a
+
+        class ="list-group-item list-group-item-action" id="gallery_figure5_5_list_AphL4daivsFg_only" data-toggle="list" href="#gallery_figure5_5_pane_AphL4daivsFg_only" role="tab" aria-controls="AphL4daivsFg_only" > AphL4daivsFg_only < / a >
+
+        < a
+
+        class ="list-group-item list-group-item-action" id="gallery_figure5_5_list_AphL4dbivsFg_only" data-toggle="list" href="#gallery_figure5_5_pane_AphL4dbivsFg_only" role="tab" aria-controls="AphL4dbivsFg_only" > AphL4dbivsFg_only < / a >
+
+        < a
+
+        class ="list-group-item list-group-item-action" id="gallery_figure5_5_list_AphE4daivsFg_only" data-toggle="list" href="#gallery_figure5_5_pane_AphE4daivsFg_only" role="tab" aria-controls="AphE4daivsFg_only" > AphE4daivsFg_only < / a >
+
+        < a
+
+        class ="list-group-item list-group-item-action" id="gallery_figure5_5_list_AphE4dbivsFg_only" data-toggle="list" href="#gallery_figure5_5_pane_AphE4dbivsFg_only" role="tab" aria-controls="AphE4dbivsFg_only" > AphE4dbivsFg_only < / a >
+
+        < a
+
+        class ="list-group-item list-group-item-action" id="gallery_figure5_5_list_AphE4dbivsAphE" data-toggle="list" href="#gallery_figure5_5_pane_AphE4dbivsAphE" role="tab" aria-controls="AphE4dbivsAphE" > AphE4dbivsAphE < / a >
+
+        < a
+
+        class ="list-group-item list-group-item-action" id="gallery_figure5_5_list_AphE4daivsAphE" data-toggle="list" href="#gallery_figure5_5_pane_AphE4daivsAphE" role="tab" aria-controls="AphE4daivsAphE" > AphE4daivsAphE < / a >
+
+        < a
+
+        class ="list-group-item list-group-item-action" id="gallery_figure5_5_list_AphL4dbivsAphL" data-toggle="list" href="#gallery_figure5_5_pane_AphL4dbivsAphL" role="tab" aria-controls="AphL4dbivsAphL" > AphL4dbivsAphL < / a >
+
+        < a
+
+        class ="list-group-item list-group-item-action" id="gallery_figure5_5_list_AphL4daivsAphL" data-toggle="list" href="#gallery_figure5_5_pane_AphL4daivsAphL" role="tab" aria-controls="AphL4daivsAphL" > AphL4daivsAphL < / a >
+
+        < a
+
+        class ="list-group-item list-group-item-action" id="gallery_figure5_5_list_AphE4dbivsFgAph" data-toggle="list" href="#gallery_figure5_5_pane_AphE4dbivsFgAph" role="tab" aria-controls="AphE4dbivsFgAph" > AphE4dbivsFgAph < / a >
+
+        < a
+
+        class ="list-group-item list-group-item-action" id="gallery_figure5_5_list_AphE4daivsFgAph" data-toggle="list" href="#gallery_figure5_5_pane_AphE4daivsFgAph" role="tab" aria-controls="AphE4daivsFgAph" > AphE4daivsFgAph < / a >
+
+        "Warning: Unable to resolve different samples in fastq/sam/bam data (apparently too many?), continuing without replicate insertion counts" +
+        "\nNote: This may be due to old style Illumina header lines" +
+        "\n      if this is an error the software will need updating to recognise different fastq header formatting conventions\n")
         # returning an empty dataframe
         return pd.DataFrame()
 

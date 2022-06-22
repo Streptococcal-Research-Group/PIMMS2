@@ -1,0 +1,43 @@
+name: venv_pimms2
+channels:
+  - bioconda
+  - defaults
+dependencies:
+  - bwa=0.7.*
+  - ca-certificates=2022.4.*
+  - certifi=2022.5.18.*
+  - k8=0.2.*
+  # - libcxx=12.0.*
+  - libffi=3.*
+  - minimap2=2.*
+  - ncurses=6.3
+  - openssl=1.1.*
+  - perl=5.26.*
+  - pip=21.2.*
+  - python=3.7.*
+  - readline=8.1.*
+  - setuptools=61.2.*
+  - sqlite=3.38.*
+  - tk=8.6.*
+  - wheel=0.37.*
+  - xz=5.2.*
+  - zlib=1.2.*
+  - pip:
+      - attrs==21.4.0
+      - configargparse==1.5.3
+      - fuzzysearch==0.7.3
+      - gffpandas==1.2.0
+      - greenlet==1.1.2
+      - importlib-metadata==4.11.4
+      - numpy==1.21.6
+      - pandas==0.25.1
+      - pandasql==0.7.3
+      - pysam==0.19.1
+      - python-dateutil==2.8.2
+      - pytz==2022.1
+      - six==1.16.0
+      - sqlalchemy==1.4.37
+      - typing-extensions==4.2.0
+      - xlsxwriter==3.0.3
+      - zipp==3.8.0
+
