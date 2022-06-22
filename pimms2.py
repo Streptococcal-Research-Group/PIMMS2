@@ -945,6 +945,15 @@ def coordinates_to_features_reps(sam_stem, attr_to_columns, condition_label):
 
     read_grps = sorted(coord_reps_df.read_grp.unique())
     read_comments = sorted(coord_reps_df.read_comment.unique())
+
+    if (len(read_comments) > 20):
+        print(
+            "Warning: Unable to resolve different samples in fastq/sam/bam data (apparently too many?), continuing without replicate insertion counts" +
+            "\nNote: This may be due to old style Illumina header lines" +
+            "\n      if this is an error the software will need updating to recognise different fastq header formatting conventions\n")
+        # returning an empty dataframe
+        return pd.DataFrame()
+
     print(str(len(read_grps)) + ' readgroups found:')
     print('\n'.join(read_grps))
     print(str(len(read_comments)) + ' sample comments found:')
