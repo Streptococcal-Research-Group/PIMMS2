@@ -7,7 +7,7 @@ dependencies:
   - ca-certificates=2022.4.*
   - certifi=2022.5.18.*
   - k8=0.2.*
-  # - libcxx=12.0.*
+ # - libcxx=12.0.*
   - libffi=3.*
   - minimap2=2.*
   - ncurses=6.3
