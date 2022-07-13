@@ -915,20 +915,32 @@ def seqid_consistancy_check(mygffcolumns, my_sam):
     af = pysam.AlignmentFile(my_sam)
     sam_seq_id_list = [name['SN'] for name in af.header['SQ']]
     gff_seq_id_list = mygffcolumns.seq_id.unique().tolist()
+
+    sam_seq_id_list = list(map(str, sam_seq_id_list))
+    gff_seq_id_list = list(map(str, gff_seq_id_list))
     sam_seq_id_list.sort()
     gff_seq_id_list.sort()
+    ## BUGFIX: section updated  to deal with inconsistent sequence IDs better
     if sam_seq_id_list == gff_seq_id_list:
         print('GFF & mapping reference sequence IDs match')
+        return ()
     elif parsed_args[0].gff_force:
         print('\nWARNING: GFF & mapping reference sequence IDs are inconsistent. \n' +
-              'sequence ID mismatch overridden by --gff_force\ngff:\n' +
-              str(gff_seq_id_list) + '\nsam/bam:\n' + str(sam_seq_id_list) + '\n')
+              'sequence ID mismatch overridden by --gff_force \nBUT please check the sequence names are consistent :running\ngff:\n' +
+              str(gff_seq_id_list) + '\nfasta/bam:\n' + str(sam_seq_id_list) + '\n')
+        return ()
+    elif set(sam_seq_id_list) <= set(gff_seq_id_list):
+        print('\nWARNING: GFF & mapping reference sequence IDs are inconsistent. \n' +
+              'but the IDs in the fast/bam are a subset of those in the gff so things are probably ok :running\ngff:\n' +
+              str(gff_seq_id_list) + '\nfasta/bam:\n' + str(sam_seq_id_list) + '\n')
+        return ()
     else:
         sys.exit(
             '\nERROR: GFF & mapping reference sequence IDs are inconsistent. \n' +
-            'SYS.EXIT: Please check and update the sequence IDs in your sequence and gff files so they match up before running again.\ngff:\n' +
+            'Run Stopped: Please check / adjust the sequence IDs in your sequence and gff files so they match up before running again.\ngff:\n' +
             str(gff_seq_id_list) + '\nsam/bam:\n' + str(sam_seq_id_list) + '\n' +
             'NOTE: If the sequence ID mismatch is benign e.g. an extra plasmid/contig, override by using --gff_force with bam_extract/full_process\n')
+    ## BUGFIX end
 
     print(type(sam_seq_id_list))
     print(type(gff_seq_id_list))
@@ -968,7 +980,7 @@ def coordinates_to_features_reps(sam_stem, attr_to_columns, condition_label):
         print(str(len(read_comments)) + " sample replicates/mutant pools established")
         # print(coord_counts_reps_df.head())
 
-    elif (len(read_grps) >= 3) & (len(read_comments) < len(read_grps)):
+    elif (len(read_grps) >= 3) & (len(read_comments) <= len(read_grps)):  # fix when read groups == read comments #~#
         coord_counts_reps_df = coord_reps_df.drop('read_comment', 1).rename(columns={"read_grp": 'sample_info'},
                                                                             inplace=False).groupby(["ref_name",
                                                                                                     "coord",

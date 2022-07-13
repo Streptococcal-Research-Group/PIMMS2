@@ -1,14 +1,19 @@
 # Pragmatic Insertion Mutant Mapping System V2
 
+PIMMS2 is a Python program to extract mutation/insertion sites/counts from sequencing data produced from a  [PIMMS](https://www.frontiersin.org/articles/10.3389/fmicb.2016.01645/full) experiment 
+
 ## Getting Started
 
 ### Creating Conda Environment
-    conda create --name pimms2 python=3.6
-    conda activate pimms2
-    conda install pip
-  
-### Install Dependancies  
-    pip install -r requirements.txt
+
+Use the provided environment.yml file in conjunction with conda to set up a virtual environment for use with pimms2.py.
+
+```bash
+conda env create -f environment.yml
+```
+To start the environment:
+```bash
+conda activate venv_pimms2
     
 ### Simple usage    
 
@@ -20,7 +25,9 @@
 
     $ python ./pimms2.py find_flank -c pimms2.config --fasta <name>.fasta --mapper bwa --min 20 --max 50 --in_dir <name> --out_dir <name> --label test  
 
-    $ python ./pimms2.py bam_extract -c pimms2.config --bam test/<name>_test_pimms2out_trim50_sub1_bwa.bam --label test --mismatch 0 --min_depth 1 --gff <name>.gff3  
+    $ python ./pimms2.py bam_extract -c pimms2.config --bam test/<name>_test_pimms2out_trim50_sub1_bwa.bam --label test --mismatch 0 --min_depth 1 --gff <name>.gff3 
+    
+    $ python ./pimms2.py full_process -c pimms2.config 
 
 
 ### Options and Usage
