@@ -20,7 +20,7 @@
 
     $ python ./pimms2.py find_flank -c pimms2.config --fasta <name>.fasta --mapper bwa --min 20 --max 50 --in_dir <name> --out_dir <name> --label test  
 
-    $ python ./pimms2.py bam_extract -c pimms2.config --sam test/<name>_test_pimms2out_trim50_sub1_bwa.bam --label test --mismatch 0 --min_depth 1 --gff <name>.gff3  
+    $ python ./pimms2.py bam_extract -c pimms2.config --bam test/<name>_test_pimms2out_trim50_sub1_bwa.bam --label test --mismatch 0 --min_depth 1 --gff <name>.gff3  
 
 
 ### Options and Usage
