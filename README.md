@@ -19,7 +19,7 @@ conda activate venv_pimms2
 ```bash
 CONDA_SUBDIR=osx-64 conda create -n pimms2 python=3.6
 
-conda actiavte pimms2
+conda activate pimms2
 
 conda config --env --set subdir osx-64
 
