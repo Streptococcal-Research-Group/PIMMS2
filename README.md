@@ -14,9 +14,9 @@ conda env create -f environment.yml
 To start the environment:
 ```bash
 conda activate venv_pimms2
-
+```
 ### Creating a Conda environment MacOS M1
-
+```bash
 CONDA_SUBDIR=osx-64 conda create -n pimms2 python=3.6
 
 conda actiavte pimms2
@@ -24,12 +24,12 @@ conda actiavte pimms2
 conda config --env --set subdir osx-64
 
 pip install -r requirements.txt
-
+```
     
 ### Simple usage    
 
 	All parameters can be set in the pimms2.config file or you can specify them on the command line
-
+```bash
     $ conda activate pimms2  
 
     $ python ./pimms2.py <module> -h
@@ -39,10 +39,10 @@ pip install -r requirements.txt
     $ python ./pimms2.py bam_extract -c pimms2.config --bam test/<name>_test_pimms2out_trim50_sub1_bwa.bam --label test --mismatch 0 --min_depth 1 --gff <name>.gff3 
     
     $ python ./pimms2.py full_process -c pimms2.config 
-
+```
 
 ### Options and Usage
-
+```bash
     python ./pimms2.py find_flank -h  
     
     Arguments:  
@@ -82,3 +82,4 @@ pip install -r requirements.txt
     --gff_force           override GFF/BAM seq id discrepancies e.g. use when the gff has a plasmid not present in the reference sequence or vice-versa  
 	--out_fmt			  xlsx, tsv, csv
 
+```
