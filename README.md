@@ -4,7 +4,7 @@ PIMMS2 is a Python program to extract mutation/insertion sites/counts from seque
 
 ## Getting Started
 
-### Creating Conda Environment
+### Creating Conda Environment Linux and MacOS x86
 
 Use the provided environment.yml file in conjunction with conda to set up a virtual environment for use with pimms2.py.
 
@@ -14,6 +14,17 @@ conda env create -f environment.yml
 To start the environment:
 ```bash
 conda activate venv_pimms2
+
+### Creating a Conda environment MacOS M1
+
+CONDA_SUBDIR=osx-64 conda create -n pimms2 python=3.6
+
+conda actiavte pimms2
+
+conda config --env --set subdir osx-64
+
+pip install -r requirements.txt
+
     
 ### Simple usage    
 
