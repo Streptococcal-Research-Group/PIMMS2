@@ -1,44 +1,38 @@
-import datetime
+import os, sys, subprocess, shutil
+import datetime, time, re
+from operator import itemgetter
 import fileinput
 import glob
 import gzip
 import multiprocessing
-import os
 import random  # for log file names
-import re
-import shutil
-import subprocess
-import sys
-import time
 import urllib as ul  # for removing url style encoding from gff text notes
 from pathlib import Path
 import configargparse
 import pandas as pd
 import pandasql as ps
-
 import pysam  # sequence format specific module fastq/bam/sam...
 import gffpandas.gffpandas as gffpd  # annotation format specific module gff3
 from fuzzysearch import find_near_matches
 
 pimms_mssg = """
-===========================================================================================================
-Pragmatic Insertional Mutation Mapping system (PIMMS) mapping pipeline v2
-===========================================================================================================
-       o         o
-       o         o
-      //        //
-     //        //
-   |_||_|    |_||_|   @@@@@  @@@@@@  @@     @@  @@     @@   @@@@@@     @@@@@@
-   |@||@|    |@||@|   @@  @@   @@    @@@@ @@@@  @@@@ @@@@  @@         @@    @@
-   |@||@|    |@||@|   @@@@@    @@    @@ @@@ @@  @@ @@@ @@   @@@            @@
-   |@||@|    |@||@|   @@       @@    @@  @  @@  @@  @  @@     @@@         @@
-   |@@@@|    |@@@@|   @@       @@    @@     @@  @@     @@       @@      @@
-   |@@@@|    |@@@@|   @@     @@@@@@  @@     @@  @@     @@  @@@@@@@    @@@@@@@@
-===========================================================================================================
-PIMMS2 """
 
-pimms_mssg2 = """ mode
-===========================================================================================================
+\t===========================================================================================================
+\tPragmatic Insertional Mutation Mapping system (PIMMS) mapping pipeline v2
+\t===========================================================================================================
+\t       o         o
+\t       o         o
+\t      //        //
+\t     //        //
+\t   |_||_|    |_||_|   @@@@@  @@@@@@  @@     @@  @@     @@   @@@@@@     @@@@@@
+\t   |@||@|    |@||@|   @@  @@   @@    @@@@ @@@@  @@@@ @@@@  @@         @@    @@
+\t   |@||@|    |@||@|   @@@@@    @@    @@ @@@ @@  @@ @@@ @@   @@@            @@
+\t   |@||@|    |@||@|   @@       @@    @@  @  @@  @@  @  @@     @@@         @@
+\t   |@@@@|    |@@@@|   @@       @@    @@     @@  @@     @@       @@      @@
+\t   |@@@@|    |@@@@|   @@     @@@@@@  @@     @@  @@     @@  @@@@@@@    @@@@@@@@
+\t===========================================================================================================
+\tPIMMS2 mode: {0}
+\t===========================================================================================================
 
 """
 
@@ -54,33 +48,9 @@ class Range(object):
 
 def create_folder(directory):
     try:
-        if not os.path.exists(directory):
-            os.makedirs(directory)
+        os.makedirs(directory, exist_ok=True)
     except OSError:
         print('Error: Creating directory. ' + directory)
-
-
-def make_results_dirs_in_sam_dir(samfile_path, run_label):
-    samdirname = os.path.dirname(samfile_path)
-    results_dir_db = os.path.join(samdirname, run_label + '_out_dashboard')
-    results_dir_info = os.path.join(samdirname, run_label + '_out_info')
-    # results_dir_kept = os.path.join(samdirname, run_label + '_out_kept')
-    if not os.path.exists(results_dir_db):
-        try:
-            os.makedirs(results_dir_db)
-            os.makedirs(results_dir_info)
-        except OSError:
-            print("Error while creating result dirs in {samdirname}")
-    else:
-        results_dir_db = os.path.join(samdirname, run_label + time.strftime("_%d%m%y_%H%M%S") + '_results_dashboard')
-        results_dir_info = os.path.join(samdirname, run_label + time.strftime("_%d%m%y_%H%M%S") + '_results_info')
-        try:
-            os.makedirs(results_dir_db)
-            os.makedirs(results_dir_info)
-        except OSError:
-            print("Error while creating incremented result dirs in {samdirname}")
-
-    return samdirname, results_dir_db, results_dir_info
 
 
 def delete_file_list(file_list):
@@ -102,1724 +72,2000 @@ def extant_file(x):
     return x
 
 
-def prog_in_path_check(prog_to_check):
-    if shutil.which(prog_to_check):
-        print('required mapper is in the path : ' + prog_to_check)
-    else:
-        sys.exit('\nERROR: ' + prog_to_check +
-                 ' cannot be found in the path. \nSYS.EXIT: Please check your environment and ensure ' + prog_to_check +
-                 ' is installed and available before trying again.\n\n')
-
-
-def concat_fastq_raw(flanking_fastq_list, label, fq_file_suffix, concat_out_dir):
-    concat_fastq_result_filename = os.path.join(concat_out_dir, label + '_RX_concat' + fq_file_suffix + '.gz')
-    print(concat_fastq_result_filename)
-    print(" ".join(flanking_fastq_list))
-
-    with gzip.open(concat_fastq_result_filename, "wt", compresslevel=6) as big_file:
-        with fileinput.input(files=flanking_fastq_list) as inputs:
-            for line in inputs:
-                big_file.write(line)
-
-    if not parsed_args[0].keep:
-        print('Removing intermediate fastq flanking reads files')
-        # print(flanking_fastq_list)
-        delete_file_list(flanking_fastq_list)
-
-    return concat_fastq_result_filename
-
-
-############################
-# FIND_FLANK FUNCTIONS:
-############################
-
-def find_read_files_with_glob(indir, wildcards):
-    for suffix_wc in wildcards:
-        read_files = glob.glob(indir + suffix_wc)
-        if len(read_files):
-            return read_files
-    sys.exit("SYS EXIT: unable to find read files, check file suffixes match permissible: " + wildcards + '\n')
-
-
-def merge_logs(log_path):
-    log_files = glob.glob(os.path.join(log_path, "log_*txt"))
-
-    df_from_each_log = (pd.read_table(f) for f in log_files)
-    merged_logs_df = pd.concat(df_from_each_log, ignore_index=True)
-    merged_logs_df = merged_logs_df.sort_values(by=['fq_filename'])
-    log_sums = merged_logs_df.sum(numeric_only=True)
-    log_sums['fq_filename'] = 'COMBINED'
-    merged_logs_df = merged_logs_df.append(log_sums, ignore_index=True)
-    merged_logs_df.to_csv(os.path.join(log_path, "..", 'result_summary.txt'), sep='\t', index=False)
-    print(merged_logs_df.to_string(index=False))
-    return merged_logs_df
-
-
-def run_minimap2(flanking_fastq_concat_result, sam_output_result, genome_fasta):
-    stream = os.popen('minimap2 --version')
-    output = stream.read()
-    print('calling minimap version: ' + output)
-    # process = subprocess.Popen(['minimap2', '--version'],
-    print(' '.join(['minimap2', '-x', 'sr', '-a',
-                    '-y',  # -y adds fastq comment to sam?
-                    '-o', sam_output_result, genome_fasta, flanking_fastq_concat_result,
-                    '--secondary=no', '--sam-hit-only']))
-    if parsed_args[0].nano:
-        mm_mode = 'map-ont'
-    else:
-        mm_mode = 'sr'
-
-    process = subprocess.Popen(
-        ['minimap2', '-x', mm_mode,
-         '-a',
-         '-y',  # -y adds fastq comment to sam
-         '-o', sam_output_result,
-         genome_fasta,
-         flanking_fastq_concat_result,
-         '--secondary=no', '--sam-hit-only'],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE)
-    stdout, stderr = process.communicate()
-    print(stdout.decode('utf-8'))
-    print(stderr.decode('utf-8'))
-
-
-def run_bwa(flanking_fastq_concat_result, sam_output_result, genome_fasta, ncpus):
-    bwa_index_dir = Path(genome_fasta).stem + '_index'
-    if not os.path.exists(os.path.join(bwa_index_dir, Path(genome_fasta).name + '.sa')):
-        print('Creating BWA index...')
-        create_folder(bwa_index_dir)
-        fasta_to_index = os.path.join(bwa_index_dir, Path(genome_fasta).name)
-        shutil.copyfile(genome_fasta, fasta_to_index)
-        process = subprocess.Popen(
-            ['bwa', 'index',
-             fasta_to_index],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE)
-        stdout, stderr = process.communicate()
-        print(stdout.decode('utf-8'))
-        print(stderr.decode('utf-8'))
-    else:
-        print('Using existing BWA index...')
-
-    print(' '.join(['bwa', 'mem', genome_fasta, flanking_fastq_concat_result, sam_output_result]))
-    # with open(sam_output_result, 'w') as f:
-    process = subprocess.Popen(
-        ['bwa', 'mem',
-         '-t', str(ncpus), "-C",
-         '-o', sam_output_result,
-         os.path.join(bwa_index_dir, Path(genome_fasta).name),
-         flanking_fastq_concat_result],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE)
-    stdout, stderr = process.communicate()
-    print(stdout.decode('utf-8'))
-    print(stderr.decode('utf-8'))
-
-
-def py_sam_to_bam(sam_output_result):
-    bam_output_result = re.sub('.sam', '.bam', sam_output_result)
-    # add?? line to remove unmapped readsbased on: | samtools view -F 4 -o onlyMapped.bam ??
-    # noinspection PyUnresolvedReferences
-    pysam.sort('-O' 'BAM', "-o", bam_output_result, sam_output_result)
-    # noinspection PyUnresolvedReferences
-    pysam.index(bam_output_result)
-    print('\nMapping stats (flagstat):\n')
-    # noinspection PyUnresolvedReferences
-    for fsline in pysam.flagstat(bam_output_result).splitlines()[:5]:
-        print(fsline)
-
-    print('\n\n')
-    # if parsed_args[0].rmfiles:
-    if not parsed_args[0].keep:
-        delete_file_list([sam_output_result])
-
-    return bam_output_result
-
-
-def pimms_fastq(fq_filename, fqout_filename, out_dir_logs, nano):
-    trans = str.maketrans('ATGCN', 'TACGN')  # complement DNA lookup
-    qry1 = parsed_args[0].motif1[0].strip("'\"")
-    qry2 = parsed_args[0].motif2[0].strip("'\"")
-    # print(str(qry1))
-    # print(str(qry2))
-
-    # revcomp using maketrans lookup and a string reverse
-    qry1rc = qry1.translate(trans)[::-1]  # reverse complement transposon motif1 ([::-1] -> reverse)
-    qry2rc = qry2.translate(trans)[::-1]  # reverse complement transposon motif2
-    # print(str(qry1rc))
-    # print(str(qry2rc))
-
-    # if parsed_args[0].nano:  # nano == True
-    if nano:  # nano == True
-        # parsed_args[0].noreps = True
-        # print('nano == True\n')
-        fuzzy_levenshtein = True
-        l_dist = parsed_args[0].lev[0]  # maximum Levenshtein Distance
-        # min_length = 50
-        # max_length = 200
-        min_length = parsed_args[0].min[0]
-        max_length = parsed_args[0].max[0]
-        qual_char = parsed_args[0].qual_char
-        print('Nanopore appropriate settings: Levenshtein distance of ' + str(l_dist)
-              + ' + sequence length min = ' + str(min_length) + ', max = ' + str(max_length))
-    else:
-        # print('nano == False\n')
-        # fuzzy_levenshtein = False
-        subs = parsed_args[0].sub[0]
-        l_dist = parsed_args[0].lev[0]  # maximum Levenstein Distance
-        fuzzy_levenshtein = bool(l_dist)
-        insrt = parsed_args[0].insert[0]
-        dels = parsed_args[0].deletion[0]
-        min_length = parsed_args[0].min[0]
-        max_length = parsed_args[0].max[0]
-        # print('standard settings\n')
-        print('illumina settings: Levenshtein distance of ' + str(l_dist)
-              + ' + sequence length min = ' + str(min_length) + ', max = ' + str(max_length))
-
-
-    count = 0
-    countq1 = 0
-    countq2 = 0
-    countq1q2 = 0
-    countq1rc = 0
-    countq2rc = 0
-    # countq1rcq2rc = 0
-    hit_but_short_q1_q2 = 0
-    hit_q1_q2 = 0
-    countq2rcq1rc = 0
-    hit_but_short_q2rc_q1rc = 0
-    hit_q2rc_q1rc = 0
-    wrongq2q1 = 0
-    wrongq1rcq2rc = 0
-    countqqrc = 0
-    countqmulti = 0
-    hit_but_short_q1_only = 0
-    hit_q1_only = 0
-    hit_but_short_q1rc_only = 0
-    hit_q1rc_only = 0
-
-    hit_but_short_q2_only = 0
-    hit_q2_only = 0
-    hit_but_short_q2rc_only = 0
-    hit_q2rc_only = 0
-    # is_contam = 0
-    # reject_reads_list = []
-    # reject_reads_dict = dict()
-
-    # To resolve/reharmonise: diferent processing code for nanopore and Illumina input files
-    if nano:
-        with pysam.FastxFile(fq_filename, persist=False) as fin, open(fqout_filename, mode='wt') as fout:
-            print(fq_filename, '  ==>\n\t##\t##\t', fqout_filename, '\n')
-            for entry in fin:
-                count += 1
-                # print(str(count) + '\n')
-                if not fuzzy_levenshtein:
-                    # print('find_near_matches \n')
-                    matchesq1 = find_near_matches(qry1, entry.sequence, max_substitutions=subs, max_deletions=dels,
-                                                  max_insertions=insrt)
-                    matchesq2 = find_near_matches(qry2, entry.sequence, max_substitutions=subs, max_deletions=dels,
-                                                  max_insertions=insrt)
-                    matchesq1rc = find_near_matches(qry1rc, entry.sequence, max_substitutions=subs, max_deletions=dels,
-                                                    max_insertions=insrt)
-                    matchesq2rc = find_near_matches(qry2rc, entry.sequence, max_substitutions=subs, max_deletions=dels,
-                                                    max_insertions=insrt)
-                else:
-                    # print('find_near_matches lev\n')
-                    matchesq1 = find_near_matches(qry1, entry.sequence, max_l_dist=l_dist)
-                    matchesq2 = find_near_matches(qry2, entry.sequence, max_l_dist=l_dist)
-                    matchesq1rc = find_near_matches(qry1rc, entry.sequence, max_l_dist=l_dist)
-                    matchesq2rc = find_near_matches(qry2rc, entry.sequence, max_l_dist=l_dist)
-
-                if not bool(matchesq1 + matchesq2 + matchesq1rc + matchesq2rc):
-                    # print(matchesq1 + matchesq2 + matchesq1rc + matchesq1rc)
-                    # reject_reads_dict.update({entry.name: 'nomatch'})
-                    continue
-                # skip fastq entry if multiple matches to same motif query seq
-                if len(matchesq1) > 1:
-                    countqmulti += 1
-                    # reject_reads_list.append(entry.name)
-                    # reject_reads_dict.update({entry.name: 'multi'})
-                    continue
-                if len(matchesq2) > 1:
-                    countqmulti += 1
-                    # reject_reads_list.append(entry.name)
-                    # reject_reads_dict.update({entry.name: 'multi'})
-                    continue
-                if len(matchesq1rc) > 1:
-                    countqmulti += 1
-                    # reject_reads_list.append(entry.name)
-                    # reject_reads_dict.update({entry.name: 'multi'})
-                    continue
-                if len(matchesq2rc) > 1:
-                    countqmulti += 1
-                    # reject_reads_list.append(entry.name)
-                    # reject_reads_dict.update({entry.name: 'multi'})
-                    continue
-                # skip fastq entry if multiple matches to same motif query direct and reverse complement
-
-                if (len(matchesq1) == 1) and (len(matchesq1rc) == 1):
-                    countqqrc += 1
-                    # reject_reads_list.append(entry.name)
-                    # reject_reads_dict.update({entry.name: 'multicomp'})
-                    continue
-                if (len(matchesq2) == 1) and (len(matchesq2rc) == 1):
-                    countqqrc += 1
-                    # reject_reads_list.append(entry.name)
-                    # reject_reads_dict.update({entry.name: 'multicomp'})
-                    continue
-                # or matches to two incompatible motifs
-                if (len(matchesq1) == 1) and (len(matchesq2rc) == 1):
-                    countqqrc += 1
-                    # reject_reads_list.append(entry.name)
-                    # reject_reads_dict.update({entry.name: 'multicomp'})
-                    continue
-                if (len(matchesq2) == 1) and (len(matchesq1rc) == 1):
-                    countqqrc += 1
-                    # reject_reads_list.append(entry.name)
-                    # reject_reads_dict.update({entry.name: 'multicomp'})
-                    continue
-                # process motif match pairs to extract target sequences
-                if (len(matchesq1) == 1) and (len(matchesq2) == 1):
-                    countq1q2 += 1
-                    captured_seqstring = str(entry.sequence)[matchesq1[0].end:matchesq2[0].start]
-                    captured_qualstring = str(entry.quality)[matchesq1[0].end:matchesq2[0].start]
-                    if len(captured_qualstring) < 5:
-                        captured_qualstring = qual_char * len(captured_seqstring)
-
-                    if matchesq2[0].start <= matchesq1[0].end:
-                        wrongq2q1 += 1
-                        # reject_reads_list.append(entry.name)
-                        # reject_reads_dict.update({entry.name: 'ooorder'})
-                        continue
-
-                    if len(captured_seqstring) >= min_length:
-                        hit_q1_q2 += 1
-                        # print('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                        fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
-                            entry.comment) + '\n')  # make comment bam compatible
-                        fout.write(captured_seqstring[0:max_length] + '\n')
-                        fout.write('+' + '\n')
-                        fout.write(captured_qualstring[0:max_length] + '\n')
-                        continue
-                    else:
-                        hit_but_short_q1_q2 += 1
-                        # reject_reads_list.append(entry.name)
-                        # reject_reads_dict.update({entry.name: 'short'})
-                    continue
-                #            break
-                if (len(matchesq1rc) == 1) and (len(matchesq2rc) == 1):
-                    countq2rcq1rc += 1
-                    captured_seqstring = str(entry.sequence)[matchesq2rc[0].end:matchesq1rc[0].start]
-                    captured_qualstring = str(entry.quality)[matchesq2rc[0].end:matchesq1rc[0].start]
-                    if len(captured_qualstring) < 5:
-                        captured_qualstring = qual_char * len(captured_seqstring)
-
-                    if matchesq1rc[0].start <= matchesq2rc[0].end:
-                        wrongq1rcq2rc += 1
-                        # reject_reads_dict.update({entry.name: 'ooorder'})
-                    if len(captured_seqstring) >= min_length:
-                        hit_q2rc_q1rc += 1
-                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                        fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
-                            entry.comment) + '\n')  # make comment bam compatible
-                        fout.write(captured_seqstring[0:max_length] + '\n')
-                        fout.write('+' + '\n')
-                        fout.write(captured_qualstring[0:max_length] + '\n')
-                        continue
-                    else:
-                        hit_but_short_q2rc_q1rc += 1
-                        # reject_reads_list.append(entry.name)
-                        # reject_reads_dict.update({entry.name: 'short'})
-                    continue
-                # process single motif matches to extract target sequences
-                if len(matchesq1) == 1:
-                    countq1 += 1
-                    captured_seqstring = str(entry.sequence)[
-                                         matchesq1[0].end:]  # nothing after colon indicates end of string
-                    captured_qualstring = str(entry.quality)[
-                                          matchesq1[0].end:]
-                    if len(captured_qualstring) < 5:
-                        captured_qualstring = qual_char * len(captured_seqstring)
-
-                    if len(captured_seqstring) >= min_length:
-                        hit_q1_only += 1
-                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                        fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
-                            entry.comment) + '\n')  # make comment bam compatible
-                        fout.write(captured_seqstring[0:max_length] + '\n')
-                        fout.write('+' + '\n')
-                        fout.write(captured_qualstring[0:max_length] + '\n')
-                        continue
-                    else:
-                        hit_but_short_q1_only += 1
-                        # reject_reads_list.append(entry.name)
-                        # reject_reads_dict.update({entry.name: 'short'})
-                    continue
-                if len(matchesq2rc) == 1:
-                    countq2rc += 1
-                    captured_seqstring = str(entry.sequence)[
-                                         matchesq2rc[0].end:]  # nothing after colon indicates end of string
-                    captured_qualstring = str(entry.quality)[
-                                          matchesq2rc[0].end:]
-                    if len(captured_qualstring) < 5:
-                        captured_qualstring = qual_char * len(captured_seqstring)
-
-                    if len(captured_seqstring) >= min_length:
-                        hit_q2rc_only += 1
-                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                        fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
-                            entry.comment) + '\n')  # make comment bam compatible
-                        fout.write(captured_seqstring[0:max_length] + '\n')
-                        fout.write('+' + '\n')
-                        fout.write(captured_qualstring[0:max_length] + '\n')
-                        continue
-                    else:
-                        hit_but_short_q2rc_only += 1
-                        # reject_reads_list.append(entry.name)
-                        # reject_reads_dict.update({entry.name: 'short'})
-                    continue
-                if len(matchesq1rc) == 1:
-                    countq1rc += 1
-                    captured_seqstring = str(entry.sequence)[
-                                         0:matchesq1rc[0].start]  # nothing after colon indicates end of string
-                    captured_qualstring = str(entry.quality)[
-                                          0:matchesq1rc[0].start]
-                    if len(captured_qualstring) < 5:
-                        captured_qualstring = qual_char * len(captured_seqstring)
-
-                    if len(captured_seqstring) >= min_length:
-                        hit_q1rc_only += 1
-                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                        fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
-                            entry.comment) + '\n')  # make comment bam compatible
-                        fout.write(captured_seqstring[-max_length:].translate(trans)[::-1] + '\n')
-                        fout.write('+' + '\n')
-                        fout.write(captured_qualstring[-max_length:][::-1] + '\n')
-                        continue
-                    else:
-                        hit_but_short_q1rc_only += 1
-                        # reject_reads_list.append(entry.name)
-                        # reject_reads_dict.update({entry.name: 'short'})
-                    continue
-                if len(matchesq2) == 1:
-                    countq2 += 1
-                    captured_seqstring = str(entry.sequence)[
-                                         0:matchesq2[0].start]  # nothing after colon indicates end of string
-                    captured_qualstring = str(entry.quality)[
-                                          0:matchesq2[0].start]
-                    if len(captured_qualstring) < 5:
-                        captured_qualstring = qual_char * len(captured_seqstring)
-
-                    if len(captured_seqstring) >= min_length:
-                        hit_q2_only += 1
-                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                        fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
-                            entry.comment) + '\n')  # make comment bam compatible
-                        fout.write(captured_seqstring[-max_length:].translate(trans)[::-1] + '\n')
-                        fout.write('+' + '\n')
-                        fout.write(captured_qualstring[-max_length:][::-1] + '\n')
-                        continue
-                    else:
-                        hit_but_short_q2_only += 1
-                        # reject_reads_list.append(entry.name)
-                        # reject_reads_dict.update({entry.name: 'short'})
-                    continue
-
-    else:
-        with pysam.FastxFile(fq_filename, persist=False) as fin, open(fqout_filename, mode='wt') as fout:
-            print(fq_filename, '  ==>\n\t\t\t', fqout_filename, '\n')
-            for entry in fin:
-                count += 1
-
-                if not fuzzy_levenshtein:
-                    # print('find_near_matches \n')
-                    matchesq1 = find_near_matches(qry1, entry.sequence, max_substitutions=subs, max_deletions=dels,
-                                                  max_insertions=insrt)
-                    matchesq2 = find_near_matches(qry2, entry.sequence, max_substitutions=subs, max_deletions=dels,
-                                                  max_insertions=insrt)
-                    matchesq1rc = find_near_matches(qry1rc, entry.sequence, max_substitutions=subs, max_deletions=dels,
-                                                    max_insertions=insrt)
-                    matchesq2rc = find_near_matches(qry2rc, entry.sequence, max_substitutions=subs, max_deletions=dels,
-                                                    max_insertions=insrt)
-                else:
-                    # print('find_near_matches lev\n')
-                    matchesq1 = find_near_matches(qry1, entry.sequence, max_l_dist=l_dist)
-                    matchesq2 = find_near_matches(qry2, entry.sequence, max_l_dist=l_dist)
-                    matchesq1rc = find_near_matches(qry1rc, entry.sequence, max_l_dist=l_dist)
-                    matchesq2rc = find_near_matches(qry2rc, entry.sequence, max_l_dist=l_dist)
-
-                if not bool(matchesq1 + matchesq2 + matchesq1rc + matchesq2rc):
-                    # print(matchesq1 + matchesq2 + matchesq1rc + matchesq1rc)
-                    # reject_reads_dict.update({entry.name: 'nomatch'})
-                    continue
-                # skip fastq entry if multiple matches to same motif query seq
-                if len(matchesq1) > 1:
-                    countqmulti += 1
-                    # reject_reads_list.append(entry.name)
-                    # reject_reads_dict.update({entry.name: 'multi'})
-                    continue
-                if len(matchesq2) > 1:
-                    countqmulti += 1
-                    # reject_reads_list.append(entry.name)
-                    # reject_reads_dict.update({entry.name: 'multi'})
-                    continue
-                if len(matchesq1rc) > 1:
-                    countqmulti += 1
-                    # reject_reads_list.append(entry.name)
-                    # reject_reads_dict.update({entry.name: 'multi'})
-                    continue
-                if len(matchesq2rc) > 1:
-                    countqmulti += 1
-                    # reject_reads_list.append(entry.name)
-                    # reject_reads_dict.update({entry.name: 'multi'})
-                    continue
-                # skip fastq entry if multiple matches to same motif query direct and reverse complement
-
-                if (len(matchesq1) == 1) and (len(matchesq1rc) == 1):
-                    countqqrc += 1
-                    # reject_reads_list.append(entry.name)
-                    # reject_reads_dict.update({entry.name: 'multicomp'})
-                    continue
-                if (len(matchesq2) == 1) and (len(matchesq2rc) == 1):
-                    countqqrc += 1
-                    # reject_reads_list.append(entry.name)
-                    # reject_reads_dict.update({entry.name: 'multicomp'})
-                    continue
-                # or matches to two incompatible motifs
-                if (len(matchesq1) == 1) and (len(matchesq2rc) == 1):
-                    countqqrc += 1
-                    # reject_reads_list.append(entry.name)
-                    # reject_reads_dict.update({entry.name: 'multicomp'})
-                    continue
-                if (len(matchesq2) == 1) and (len(matchesq1rc) == 1):
-                    countqqrc += 1
-                    # reject_reads_list.append(entry.name)
-                    # reject_reads_dict.update({entry.name: 'multicomp'})
-                    continue
-                # process motif match pairs to extract target sequences
-                if (len(matchesq1) == 1) and (len(matchesq2) == 1):
-                    countq1q2 += 1
-                    captured_seqstring = str(entry.sequence)[matchesq1[0].end:matchesq2[0].start]
-                    captured_qualstring = str(entry.quality)[matchesq1[0].end:matchesq2[0].start]
-                    if matchesq2[0].start <= matchesq1[0].end:
-                        wrongq2q1 += 1
-                        # reject_reads_list.append(entry.name)
-                        # reject_reads_dict.update({entry.name: 'ooorder'})
-                        continue
-
-                    if len(captured_seqstring) >= min_length:
-                        hit_q1_q2 += 1
-                        # print('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                        fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
-                            entry.comment) + '\n')  # make comment bam compatible
-                        fout.write(captured_seqstring[0:max_length] + '\n')
-                        fout.write('+' + '\n')
-                        fout.write(captured_qualstring[0:max_length] + '\n')
-                        continue
-                    else:
-                        hit_but_short_q1_q2 += 1
-                        # reject_reads_list.append(entry.name)
-                        # reject_reads_dict.update({entry.name: 'short'})
-                    continue
-                #            break
-                if (len(matchesq1rc) == 1) and (len(matchesq2rc) == 1):
-                    countq2rcq1rc += 1
-                    captured_seqstring = str(entry.sequence)[matchesq2rc[0].end:matchesq1rc[0].start]
-                    captured_qualstring = str(entry.quality)[matchesq2rc[0].end:matchesq1rc[0].start]
-                    if matchesq1rc[0].start <= matchesq2rc[0].end:
-                        wrongq1rcq2rc += 1
-                        # reject_reads_dict.update({entry.name: 'ooorder'})
-                    if len(captured_seqstring) >= min_length:
-                        hit_q2rc_q1rc += 1
-                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                        fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
-                            entry.comment) + '\n')  # make comment bam compatible
-                        fout.write(captured_seqstring[0:max_length] + '\n')
-                        fout.write('+' + '\n')
-                        fout.write(captured_qualstring[0:max_length] + '\n')
-                        continue
-                    else:
-                        hit_but_short_q2rc_q1rc += 1
-                        # reject_reads_list.append(entry.name)
-                        # reject_reads_dict.update({entry.name: 'short'})
-                    continue
-                # process single motif matches to extract target sequences
-                if len(matchesq1) == 1:
-                    countq1 += 1
-                    captured_seqstring = str(entry.sequence)[
-                                         matchesq1[0].end:]  # nothing after colon indicates end of string
-                    captured_qualstring = str(entry.quality)[
-                                          matchesq1[0].end:]
-                    if len(captured_seqstring) >= min_length:
-                        hit_q1_only += 1
-                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                        fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
-                            entry.comment) + '\n')  # make comment bam compatible
-                        fout.write(captured_seqstring[0:max_length] + '\n')
-                        fout.write('+' + '\n')
-                        fout.write(captured_qualstring[0:max_length] + '\n')
-                        continue
-                    else:
-                        hit_but_short_q1_only += 1
-                        # reject_reads_list.append(entry.name)
-                        # reject_reads_dict.update({entry.name: 'short'})
-                    continue
-                if len(matchesq2rc) == 1:
-                    countq2rc += 1
-                    captured_seqstring = str(entry.sequence)[
-                                         matchesq2rc[0].end:]  # nothing after colon indicates end of string
-                    captured_qualstring = str(entry.quality)[
-                                          matchesq2rc[0].end:]
-                    if len(captured_seqstring) >= min_length:
-                        hit_q2rc_only += 1
-                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                        fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
-                            entry.comment) + '\n')  # make comment bam compatible
-                        fout.write(captured_seqstring[0:max_length] + '\n')
-                        fout.write('+' + '\n')
-                        fout.write(captured_qualstring[0:max_length] + '\n')
-                        continue
-                    else:
-                        hit_but_short_q2rc_only += 1
-                        # reject_reads_list.append(entry.name)
-                        # reject_reads_dict.update({entry.name: 'short'})
-                    continue
-                if len(matchesq1rc) == 1:
-                    countq1rc += 1
-                    captured_seqstring = str(entry.sequence)[
-                                         0:matchesq1rc[0].start]  # nothing after colon indicates end of string
-                    captured_qualstring = str(entry.quality)[
-                                          0:matchesq1rc[0].start]
-                    if len(captured_seqstring) >= min_length:
-                        hit_q1rc_only += 1
-                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                        fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
-                            entry.comment) + '\n')  # make comment bam compatible
-                        fout.write(captured_seqstring[-max_length:].translate(trans)[::-1] + '\n')
-                        fout.write('+' + '\n')
-                        fout.write(captured_qualstring[-max_length:][::-1] + '\n')
-                        continue
-                    else:
-                        hit_but_short_q1rc_only += 1
-                        # reject_reads_list.append(entry.name)
-                        # reject_reads_dict.update({entry.name: 'short'})
-                    continue
-                if len(matchesq2) == 1:
-                    countq2 += 1
-                    captured_seqstring = str(entry.sequence)[
-                                         0:matchesq2[0].start]  # nothing after colon indicates end of string
-                    captured_qualstring = str(entry.quality)[
-                                          0:matchesq2[0].start]
-                    if len(captured_seqstring) >= min_length:
-                        hit_q2_only += 1
-                        # fout.write('@' + str(entry.name) + ' ' + str(entry.comment) + '\n')
-                        fout.write('@' + str(entry.name) + ' ' + 'CO:Z:' + str(
-                            entry.comment) + '\n')  # make comment bam compatible
-                        fout.write(captured_seqstring[-max_length:].translate(trans)[::-1] + '\n')
-                        fout.write('+' + '\n')
-                        fout.write(captured_qualstring[-max_length:][::-1] + '\n')
-                        continue
-                    else:
-                        hit_but_short_q2_only += 1
-                        # reject_reads_list.append(entry.name)
-                        # reject_reads_dict.update({entry.name: 'short'})
-                    continue
-
-    # print("\n" + fq_filename + "  ->>\n" + fqout_filename + "#####################@@@@@@@@@@@@@@@@@@@@\n")
-
-    # print('#######################################################~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~log1\n')
-    # very cryptic logging needs reorganising and fixing to work with multiprocessing
-    # note added random int  to get almost unique log file names need to find fix
-    log_file = open(
-        f'{out_dir_logs}/log_{os.getppid()}_{multiprocessing.current_process().pid}_{random.randint(1000, 9999)}.txt', 'w'
-    )
-
-    try:
-        # print(fq_filename, fqout_filename, 'logfail2\n')
-        log_file.write(
-            f'fq_filename\tread count:\tmultiple copies of a motif:\tmismatched motifs:\tboth motifs (fwd|revcomp):\t'
-            'both motifs (fwd|revcomp) >= {min_length}:\tsingle motif  >= {min_length}:\ttotal passed\n')
-        log_file.write(f'{os.path.basename(fq_filename)}\t')
-        log_file.write(f'{count}\t')
-        log_file.write(f'{countqmulti}\t')
-        log_file.write(f'{countqqrc}\t')
-        log_file.write(
-            f'{hit_q1_q2 + hit_q2rc_q1rc + hit_but_short_q1_q2 + hit_but_short_q2rc_q1rc}\t')
-        log_file.write(f'{hit_q1_q2 + hit_q2rc_q1rc}\t')
-        log_file.write(f'{hit_q1_only + hit_q2_only + hit_q1rc_only + hit_q2rc_only}\t')
-        log_file.write(f'{hit_q1_only + hit_q2_only + hit_q1rc_only + hit_q2rc_only + hit_q1_q2 + hit_q2rc_q1rc}\n')
-    except Exception as e:
-        # Write problems to the error file
-        log_file.write(f'ERROR: {e} problem with motif matching to {fq_filename}!\n')
-    finally:
-        # Close the files!
-        log_file.close()
-
-
-
-# def survey_fastq(resultx_reads_list, resultx_reads_dict, fqout):
-def survey_fastq(resultx_reads_list, fqout):
-    with pysam.FastxFile(fqout, persist=False) as fh:
-        for entry in fh:
-            resultx_reads_list.append(entry.name)
-            # resultx_reads_dict[entry.name] = len(str(entry.sequence))
-
-
-############################
-# FIND_FLANK FUNCTIONS end
-############################
-
-############################
-# SAM_COORDS FUNCTIONS:
-############################
-
-
-def process_gff(gff_file, gff_feat_type, gff_extra, rdir):
-    annotation = gffpd.read_gff3(gff_file)
-    annotation = annotation.filter_feature_of_type(gff_feat_type)
-
-    gff_stem, gff_ext = os.path.splitext(os.path.basename(gff_file))
-
-    if gff_feat_type[0] == "pseudogene":
-        annotation.to_gff3(os.path.join(rdir, gff_stem + '_pimms_features_pseudogene.gff'))
-    else:
-        annotation.to_gff3(os.path.join(rdir, gff_stem + '_pimms_features.gff'))
-
-    # break 9th gff column key=value pairs down to make additional columns
-    attr_to_columns = annotation.attributes_to_columns()
-
-    if attr_to_columns.empty:
-        # return empty dataframes if no rows of required type are found print('attr_to_columns is empty!')
-        return attr_to_columns, attr_to_columns
-
-    attr_to_columns = attr_to_columns.assign(
-        feat_length=(attr_to_columns.end - attr_to_columns.start + 1)).dropna(axis=1,
-                                                                              how='all').drop(columns=['attributes'])
-
-    data_top = attr_to_columns.head()
-    print(data_top)
-
-    # remove RFC 3986 % encoding from product (gff3 attribute)
-    # attr_to_columns = attr_to_columns.assign(product_nopc=attr_to_columns['product'].apply(ul.parse.unquote)).drop(
-    #    columns=['product']).rename(columns={'product_nopc': 'product'})
-
-    # attr_to_columns['product'] = attr_to_columns['product'].apply(ul.parse.unquote)
-    if 'product' not in attr_to_columns:
-        attr_to_columns['product'] = '-'
-    else:
-        attr_to_columns['product'] = attr_to_columns['product'].fillna('').astype(str).apply(ul.parse.unquote)  # added fix for None datatype
-    # fix to skip requested extra gff annotation field if not present in GFF
-    drop_gff_extra = []
-    for field in gff_extra:
-        if field not in attr_to_columns:
-            print("Warning: Unable to find '" + field + "' in " + str(gff_file) + ' file, continuing...')
-            drop_gff_extra.append(field)
-
-    gff_extra = [item for item in gff_extra if item not in drop_gff_extra]
-
-    # Remove URL character encoding from columns  (skipping translation if present as this breaks the decoding
-    for field in gff_extra:
-        if field == 'translation':
-            continue
-        else:
-            attr_to_columns[field] = attr_to_columns[field].fillna('').astype(str).apply(ul.parse.unquote)  # added fix for None datatype
-
-    gff_columns_addback = attr_to_columns[['seq_id',
-                                           'ID',  # additional hopefully unique feature ID
-                                           'locus_tag',
-                                           'type',
-                                           'gene',
-                                           'start',
-                                           'end',
-                                           'feat_length',
-                                           'product'] + gff_extra].copy()  # add extra fields from gff
-    # fix to remove na values and allow joining with processed data also processed with fillna to allow group_by usage
-    # note .copy on previous line
-    gff_columns_addback.fillna('', inplace=True)
-
-    data_top = gff_columns_addback.head()
-    print(data_top)
-    data_top2 = attr_to_columns.head()
-    print(data_top2)
-
-    return gff_columns_addback, attr_to_columns
-    # end process_gff()
-
-
-def modify_sam_stem(sam_file, min_depth_cutoff, fraction_mismatch):
-    sam_stem, sam_ext = os.path.splitext(os.path.basename(sam_file))
-    sam_stem: str = sam_stem + '_md' + str(min_depth_cutoff) + '_mm' + str(fraction_mismatch or '0')
-    return sam_stem
-
-
-def process_sam(sam_file, min_depth_cutoff, fraction_mismatch):
-    sam_stem = modify_sam_stem(sam_file, min_depth_cutoff, fraction_mismatch)
-    samfile = pysam.AlignmentFile(sam_file)  # without , "rb" should auto detect sam or bams
-
-    open(sam_stem + ".bed", 'w').close()
-    f = open(sam_stem + ".bed", "a")
-
-    strand = ["+", "-"]
-    for read in samfile.fetch():
-        if read.is_unmapped:
-            continue
-        read_str = strand[int(read.is_reverse)]
-        read_bed = [read.reference_name, read.pos, read.reference_end, ".", read.mapping_quality, read_str, '# ' + read.query_name]  # read group added
-        f.write('\t'.join([str(i) for i in read_bed]))
-        f.write('\n')
-    f.close()
-    print('#BED')
-    samfile.close()
-
-    samfile = pysam.AlignmentFile(sam_file)
-    open(sam_stem + "_insert_coords.txt", 'w').close()
-    f2 = open(sam_stem + "_insert_coords.txt", "a")
-    f2.write('\t'.join([str(i) for i in ['ref_name', 'coord', 'strand', 'read_name', 'read_grp', 'read_comment']]))
-    # f2.write('\t'.join([str(i) for i in ['ref_name', 'coord', 'strand', 'read_name', 'read_grp']]))
-    f2.write('\n')
-    strand = ["+", "-"]
-    for read in samfile.fetch():
-        if read.is_unmapped:
-            continue
-        # print(read.query_name + '.')
-        # continue
-        nm_value = read.get_tag('NM')
-        if fraction_mismatch:  # and NM_value > 0:
-            if (read.query_alignment_length * fraction_mismatch[0]) > nm_value:
-                continue
-        read_str = strand[int(read.is_reverse)]  # coverts is_reverse boolean into + or - strings
-        # print(STR)
-        # continue
-        if read_str == '+':
-            read_coords = [read.reference_name, (read.reference_start + 4), read_str, '# ' + read.query_name, ':'.join(read.query_name.split(':', 4)[:4]),
-                           read.get_tag("CO").split(":")[-1]]  # add fq comment sample id number
-            #          ':'.join(read.query_name.split(':', 4)[:4])]
-            f2.write('\t'.join([str(i) for i in read_coords]))
-            f2.write('\n')
-        if read_str == '-':
-            read_coords = [read.reference_name, (read.reference_end - 4), read_str, '# ' + read.query_name, ':'.join(read.query_name.split(':', 4)[:4]),
-                           read.get_tag("CO").split(":")[-1]]  # add fq comment sample id number
-            #          ':'.join(read.query_name.split(':', 4)[:4])]
-            f2.write('\t'.join([str(i) for i in read_coords]))
-            f2.write('\n')
-    f2.close()
-    samfile.close()
-    print('#COORDS')
-    # end process_sam()
-
-
-def seqid_consistancy_check(mygffcolumns, my_sam):
-    af = pysam.AlignmentFile(my_sam)
-    sam_seq_id_list = [name['SN'] for name in af.header['SQ']]
-    gff_seq_id_list = mygffcolumns.seq_id.unique().tolist()
-
-    sam_seq_id_list = list(map(str, sam_seq_id_list))
-    gff_seq_id_list = list(map(str, gff_seq_id_list))
-    sam_seq_id_list.sort()
-    gff_seq_id_list.sort()
-    ## BUGFIX: section updated  to deal with inconsistent sequence IDs better
-    if sam_seq_id_list == gff_seq_id_list:
-        print('GFF & mapping reference sequence IDs match')
-        return ()
-    elif parsed_args[0].gff_force:
-        print('\nWARNING: GFF & mapping reference sequence IDs are inconsistent. \n' +
-              'sequence ID mismatch overridden by --gff_force \nBUT please check the sequence names are consistent :running\ngff:\n' +
-              str(gff_seq_id_list) + '\nfasta/bam:\n' + str(sam_seq_id_list) + '\n')
-        return ()
-    elif set(sam_seq_id_list) <= set(gff_seq_id_list):
-        print('\nWARNING: GFF & mapping reference sequence IDs are inconsistent. \n' +
-              'but the IDs in the fast/bam are a subset of those in the gff so things are probably ok :running\ngff:\n' +
-              str(gff_seq_id_list) + '\nfasta/bam:\n' + str(sam_seq_id_list) + '\n')
-        return ()
-    else:
-        sys.exit(
-            '\nERROR: GFF & mapping reference sequence IDs are inconsistent. \n' +
-            'Run Stopped: Please check / adjust the sequence IDs in your sequence and gff files so they match up before running again.\ngff:\n' +
-            str(gff_seq_id_list) + '\nsam/bam:\n' + str(sam_seq_id_list) + '\n' +
-            'NOTE: If the sequence ID mismatch is benign e.g. an extra plasmid/contig, override by using --gff_force with bam_extract/full_process\n')
-    ## BUGFIX end
-
-    print(type(sam_seq_id_list))
-    print(type(gff_seq_id_list))
-    print(sam_seq_id_list)
-    print(gff_seq_id_list)
-
-
-def coordinates_to_features_reps(sam_stem, attr_to_columns, condition_label):
-    coord_reps_df = pd.read_csv(sam_stem + "_insert_coords.txt", sep='\t', dtype={'ref_name': "str",
-                                                                                  'coord': "int64",
-                                                                                  'read_comment': "str",
-                                                                                  # adding miseq support
-                                                                                  'read_grp': "str"})
-
-    read_grps = sorted(coord_reps_df.read_grp.unique())
-    read_comments = sorted(coord_reps_df.read_comment.unique())
-
-    if (len(read_comments) > 20):
-        print(
-            "Warning: Unable to resolve different samples in fastq/sam/bam data (apparently too many?), continuing without replicate insertion counts" +
-            "\nNote: This may be due to old style Illumina header lines" +
-            "\n      if this is an error the software will need updating to recognise different fastq header formatting conventions\n")
-        # returning an empty dataframe
-        return pd.DataFrame()
-
-    print(str(len(read_grps)) + ' readgroups found:')
-    print('\n'.join(read_grps))
-    print(str(len(read_comments)) + ' sample comments found:')
-    print(', '.join(read_comments))
-
-    if (len(read_grps) < len(read_comments)) & (len(read_comments) >= 3):
-        coord_counts_reps_df = coord_reps_df.drop('read_grp', 1).rename(columns={"read_comment": 'sample_info'},
-                                                                        inplace=False).groupby(["ref_name",
-                                                                                                "coord",
-                                                                                                'sample_info']).size().reset_index(
-            name=condition_label + '_')  # adding miseq support
-        print(str(len(read_comments)) + " sample replicates/mutant pools established")
-        # print(coord_counts_reps_df.head())
-
-    elif (len(read_grps) >= 3) & (len(read_comments) <= len(read_grps)):  # fix when read groups == read comments #~#
-        coord_counts_reps_df = coord_reps_df.drop('read_comment', 1).rename(columns={"read_grp": 'sample_info'},
-                                                                            inplace=False).groupby(["ref_name",
-                                                                                                    "coord",
-                                                                                                    "sample_info"]).size().reset_index(
-            name=condition_label + '_')  # adding miseq support
-        print(str(len(read_grps)) + " sample replicates/mutant pools established")
-        # print(coord_counts_reps_df.head())
-
-    # if max(len(read_grps), len(read_comments)) < 3:
-    else:
-        print(
-            "Warning: Unable to resolve >= 3 samples in fastq/sam/bam data, continuing without replicate insertion counts" +
-            "\nN.B: If this is an error the software may need updating to recognise novel fastq naming conventions")
-        # returning an empty dataframe
-        return pd.DataFrame()
-
-    coord_df_pivot = coord_counts_reps_df.copy(deep=False).pivot_table(index=["ref_name", "coord"],
-                                                                       columns=['sample_info'],
-                                                                       values=[condition_label + '_'],
-                                                                       fill_value=0).reset_index()
-
-    coord_df_pivot.columns = [''.join(col).strip() for col in coord_df_pivot.columns.values]
-
-    sample_grps = sorted(coord_counts_reps_df.sample_info.unique())
-
-    old_rep_names = [condition_label + '_' + str(x) for x in sample_grps]
-    new_rep_names = [condition_label + '_' + "MP" + str(x) for x in range(1, len(sample_grps) + 1)]
-
-    coord_df_pivot.rename(columns=dict(zip(old_rep_names, new_rep_names)), inplace=True)
-
-    attr_to_columns_short = attr_to_columns[["seq_id", "start", "end"]]
-
-    sqlcode = '''
-        select coord_df_pivot.*
-        ,attr_to_columns_short.*
-        from attr_to_columns_short
-        left join coord_df_pivot
-        on coord_df_pivot.coord between attr_to_columns_short.start and attr_to_columns_short.end
-        where coord_df_pivot.ref_name like '%' || attr_to_columns_short.seq_id || '%'
-        '''
-    # wierd sqlite concatenation + >> || ,  '%' == wildcard double check effect of this
-    # this line should allow multi contig files
-
-    mp_coords_join_gff = ps.sqldf(sqlcode, locals())
-
-    # remove first 2 columns ref_name, coord sums the rest according to the feature coordinate groups
-    mp_reps_feature_counts = mp_coords_join_gff.drop(mp_coords_join_gff.columns[[0, 1]], axis=1).groupby(
-        ['seq_id', 'start', 'end']).agg(["sum"]).reset_index()
-
-    mp_reps_feature_counts.columns = mp_reps_feature_counts.columns.get_level_values(0)
-    return mp_reps_feature_counts
-
-
-def coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, condition_label, min_depth_cutoff,
-                            gff_extra, db_rdir):
-    coord_df = pd.read_csv(sam_stem + "_insert_coords.txt", sep='\t', dtype={'ref_name': "str", 'coord': "int64"})
-    coord_counts_df = coord_df.groupby(['ref_name', 'coord']).size().reset_index(name='counts')
-    # print(coord_counts_df.head())
-    number_of_insertion_sites = len(coord_counts_df)
-    number_of_reads_mapped = coord_counts_df['counts'].sum()
-    min_reads_at_site = coord_counts_df['counts'].min()
-    max_reads_at_site = coord_counts_df['counts'].max()
-    median_reads_at_site = round(coord_counts_df['counts'].median(), 2)
-
-    mean_insertion_site_depth = round(number_of_reads_mapped / number_of_insertion_sites, 2)
-
-    coord_counts_df = coord_counts_df[coord_counts_df['counts'] >= min_depth_cutoff]
-
-    # format insertion site info as a GFF
-    coord_counts_df_pimms2_gff = coord_counts_df.reset_index()
-
-    coord_counts_df_pimms2_gff['source'] = 'pimms2'
-    coord_counts_df_pimms2_gff['feature_type'] = 'misc_feature'
-    coord_counts_df_pimms2_gff['strand'] = '.'
-    coord_counts_df_pimms2_gff['phase'] = '.'
-    coord_counts_df_pimms2_gff['stop'] = coord_counts_df_pimms2_gff['coord']
-    coord_counts_df_pimms2_gff = coord_counts_df_pimms2_gff.rename(columns={'counts': 'score', 'coord': 'start'})
-    coord_counts_df_pimms2_gff['info'] = 'note=insertion;'
-    coord_counts_df_pimms2_gff = coord_counts_df_pimms2_gff[
-        ['ref_name', 'source', 'feature_type', 'start', 'stop', 'score', 'strand', 'phase', 'info']]
-    print(coord_counts_df_pimms2_gff.head())
-    coord_counts_df_pimms2_gff.to_csv(os.path.join(db_rdir, condition_label + "_pimms_insert_coordinates" + ".gff"), index=False, sep='\t',
-                                      header=False)
-
-    # added .loc to fix warning
-    # SettingWithCopyWarning:
-    # A value is trying to be set on a copy of a slice from a DataFrame.
-    # Try using .loc[row_indexer,col_indexer] = value instead
-    # coord_counts_df = \
-    coord_counts_df.loc[:, 'between_insertion_gap'] = coord_counts_df.groupby(['ref_name'])['coord'].diff()
-    # coord_counts_df = coord_counts_df.loc[:, 'between_insertion_gap'] = coord_counts_df['coord'].diff()
-    # coord_counts_gt1_df = coord_counts_gt1_df({'between_insertion_gap': 0})
-
-    min_between_insertion_gap = coord_counts_df['between_insertion_gap'].min()
-    max_between_insertion_gap = coord_counts_df['between_insertion_gap'].max()
-    median_between_insertion_gap = coord_counts_df['between_insertion_gap'].median()
-    mean_between_insertion_gap = round(coord_counts_df['between_insertion_gap'].mean(), 2)
-
-    # attr_to_columns.to_csv("attr_to_columns" + ".txt", index=False, sep='\t', header=True)
-
-    sqlcode = '''
-        select coord_counts_df.*
-        ,attr_to_columns.*
-        from attr_to_columns
-        left join coord_counts_df
-        on coord_counts_df.coord between attr_to_columns.start and attr_to_columns.end
-        where coord_counts_df.ref_name like '%' || attr_to_columns.seq_id || '%'
-        '''
-    # wierd sqlite concatenation + >> || ,  '%' == wildcard double check effect of this
-    # this line should allow multi contig files
-
-    coords_join_gff = ps.sqldf(sqlcode, locals())
-
-
-    # debugging save of intermediate data
-    # coords_join_gff.to_csv("pimms_coords_join_gffstuff" + condition_label + ".txt", index=False, sep='\t', header=False)
-
-    # quick dataframe summary
-    # coords_join_gff.count
-    # add position as percentile (needs manual confirmation)
-    coords_join_gff = coords_join_gff.assign(
-        # python/pandas implementation of PIMMS.pl code to derive insert position as percentile of gene length
-        # sprintf("%.1f", ((($in-$in_start)+1) / ($in_length/100)));
-        # sprintf("%.1f", ((($in_stop-$ in) + 1) / ($in_length / 100)));
-        posn_as_percentile=(((coords_join_gff.coord - coords_join_gff.start) + 1) / (
-                coords_join_gff.feat_length / 100)).where(
-            coords_join_gff.strand == '+', ((coords_join_gff.end - coords_join_gff.coord) + 1) / (
-                    coords_join_gff.feat_length / 100))).round({"posn_as_percentile": 1})
-    print(list(attr_to_columns.columns.values))
-
-    # Important fix group by doesn't work -- any rows with nan values get dropped *yikes very bad!!!!*
-    coords_join_gff.fillna('', inplace=True)
-
-    pimms_result_table = coords_join_gff.groupby(
-        ['seq_id', 'ID',  # added ID field as unique identifier
-         'locus_tag', 'type', 'gene', 'start', 'end', 'feat_length', 'product'] + gff_extra).agg(
-        num_insertions_mapped_per_feat=('counts', 'sum'),
-        num_insert_sites_per_feat=('counts', 'count'),
-        first_insert_posn_as_percentile=('posn_as_percentile', 'min'),
-        last_insert_posn_as_percentile=('posn_as_percentile', 'max')
-    ).reset_index()
-
-    # test diagnostic files
-    #pimms_result_table.to_csv("pimms_coords_join_prt1_" + condition_label + ".txt", index=False, sep='\t', header=True)
-
-    pimms_result_table = pimms_result_table.assign(num_insert_sites_per_feat_per_kb=(
-            (pimms_result_table.num_insert_sites_per_feat / pimms_result_table.feat_length) * 1000),
-        NRM_score=((pimms_result_table.num_insertions_mapped_per_feat / (
-                pimms_result_table.feat_length / 1000)) / (
-                           number_of_reads_mapped / 1e6)),
-        NIM_score=((pimms_result_table.num_insert_sites_per_feat / (
-                pimms_result_table.feat_length / 1000)) / (
-                           number_of_reads_mapped / 1e6))
-    ).round({'num_insert_sites_per_feat_per_kb': 2, 'NRM_score': 2, 'NIM_score': 2})
-    print(list(pimms_result_table.columns.values))
-
-    # test diagnostic files
-    # pimms_result_table.to_csv("pimms_coords_join_prt2_" + condition_label + ".txt", index=False, sep='\t', header=False)
-
-    pimms_result_table = pimms_result_table[['seq_id',
-                                             'ID',
-                                             'locus_tag',
-                                             'type',
-                                             'gene',
-                                             'start',
-                                             'end',
-                                             'feat_length',
-                                             'product'] + gff_extra +
-                                            ['num_insertions_mapped_per_feat',
-                                             'num_insert_sites_per_feat',
-                                             'num_insert_sites_per_feat_per_kb',
-                                             'first_insert_posn_as_percentile',
-                                             'last_insert_posn_as_percentile',
-                                             'NRM_score',  # Normalised Reads Mapped
-                                             'NIM_score']]  # Normalised Insertions Mapped
-
-    print(list(pimms_result_table.columns.values))
-
-    # pimms_result_table_full gff_columns_addback
-
-    navalues = {'num_insertions_mapped_per_feat': int(0),
-                'num_insert_sites_per_feat': int(0),
-                'num_insert_sites_per_feat_per_kb': int(0),
-                'first_insert_posn_as_percentile': int(0),
-                'last_insert_posn_as_percentile': int(0),
-                'NRM_score': int(0),
-                'NIM_score': int(0)}
-    pimms_result_table_full = pd.merge(gff_columns_addback, pimms_result_table, how='left').fillna(value=navalues)
-
-    # test diagnostic files
-    # gff_columns_addback.to_csv("pimms_coords_join_gff_columns_addback_" + condition_label + ".txt", index=False, sep='\t', header=False)
-    # pimms_result_table_full.to_csv("pimms_coords_join_prtf1_" + condition_label + ".txt", index=False, sep='\t', header=False)
-
-    # if set add prefix to columns
-    if condition_label:
-        label_cols = pimms_result_table_full.columns[
-            pimms_result_table_full.columns.isin(['num_insertions_mapped_per_feat',
-                                                  'num_insert_sites_per_feat',
-                                                  'num_insert_sites_per_feat_per_kb',
-                                                  'first_insert_posn_as_percentile',
-                                                  'last_insert_posn_as_percentile',
-                                                  'NRM_score',
-                                                  'NIM_score'])]
-        pimms_result_table_full.rename(columns=dict(zip(label_cols, condition_label + '_' + label_cols)),
-                                       inplace=True)
-
-    return pimms_result_table_full
-    # end of coordinates_to_features()
-
-
-############################
-# SAM_COORDS FUNCTIONS end
-############################
-
-def parse_arguments():
-    ap = configargparse.ArgumentParser(  # description='PIMMS2 sam/bam processing',
-        prog="pimms2",
-        add_config_file_help=False,
-        config_file_parser_class=configargparse.DefaultConfigFileParser,
-        epilog="\n\n*** N.B. This is a development version ***\n \n ",
-        description='''description here'''
-    )
-    ap.add_argument('-v', '--version', action='version', version='%(prog)s 2.1 demo')
-
-    modes = ap.add_subparsers(parser_class=configargparse.ArgParser, dest='command')
-
-    findflank = modes.add_parser("find_flank", add_config_file_help=False,
-                                 help="Mode: find read regions flanking the IS sequence by mapping them to the target genome",
-                                 description="Args that start with '--' (eg. --fasta) can also be set in a config file (specified via -c)")
-
-    samcoords = modes.add_parser("bam_extract", add_config_file_help=False,
-                                 help="Mode: extract insertion site coordinates from sam file",
-                                 description="Args that start with '--' (eg. --fasta) can also be set in a config file (specified via -c)")
-
-    tablemerge = modes.add_parser("table_merge", add_config_file_help=False,
-                                  help='Mode: merge two compatible PIMMS results tables '
-                                       '(N.B: this step does a simple table join and does not check the data)').add_mutually_exclusive_group()
-
-    fullprocess = modes.add_parser("full_process", add_config_file_help=False,
-                                   help="Mode: find_flank + bam_extract",
-                                   description="Args that start with '--' (eg. --fasta) can also be set in a config file (specified via -c)")
-
-    # FIND_FLANK args
-    # to fix: nargs='?' deal with mistaken use of nargs=1 which give a single element list
-    findflank.add_argument("-c", "--config", required=False, is_config_file=True,  # dest='config_file',
-                           metavar='pimms2.config',
-                           help="use parameters from config file")
-    findflank.add_argument("--nano", required=False, action='store_true', default=False,
-                           help="override with settings more suitable for nanopore")
-    findflank.add_argument("--fasta", required=False, nargs=1, metavar='ref_genome.fasta', type=extant_file,
-                           help="fasta file for reference genome ")
-    findflank.add_argument("--qual_char", required=False, nargs='?', type=str, default='0', choices=[chr(x + 33) for x in list(range(12, 31))],
-                           help="substitute a quality score ascii character when fasta read files used (nanopore only) (phred +33: ascii +:?) ['0']")
-    findflank.add_argument("--nomap", required=False, action='store_true', default=False,
-                           help="do not run mapping step")
-    findflank.add_argument("--mapper", required=False, nargs='?', type=str, default='bwa', choices=['minimap2', 'bwa'],
-                           help="select mapping software from available options")
-    findflank.add_argument("--single", required=False, action='store_true', default=False,
-                           help="only single direction Illumina data provided")
-    findflank.add_argument("--keep", required=False, action='store_true', default=False,
-                           help="keep intermediate fastq files etc for diagnostic purposes")
-    findflank.add_argument("--lev", required=False, nargs=1, type=int, default=[0],
-                           help="use Levenshtein distance (combined insert|del|sub score) [0]")
-    findflank.add_argument("--sub", required=False, nargs=1, type=int, default=[1],
-                           help="number of permitted base substitutions in motif match [1]")
-    findflank.add_argument("--insert", required=False, nargs=1, type=int, default=[0],
-                           help="number of permitted base insertions in motif match [0]")
-    findflank.add_argument("--del", required=False, nargs=1, type=int, default=[0], dest='deletion',
-                           help="number of permitted base insertions in motif match [0]")
-    findflank.add_argument("--in_dir", required=True, nargs=1, dest='in_dir', type=extant_file,
-                           help="directory containing input fastq files (assumed to match '*q.gz' or '*.fastq')")
-    findflank.add_argument("--fwdrev", required=False, nargs=1, type=str, default=['_R1_,_R2_'],
-                           help="text substring to uniquely identify illumina fwd/rev paired fastq files ['_R1_,_R2_']")
-    findflank.add_argument("--out_dir", required=False, nargs=1, metavar='out_dir', default=[''],
-                           action='store',
-                           help="directory to contain result files ['pimms2_`label`_`dmy`_`HMS`']")
-    findflank.add_argument("--cpus", required=False, nargs=1, type=int,  # default=[4],
-                           default=[int(os.cpu_count() / 2)],
-                           help="number of processors to use [(os.cpu_count() / 2)] ")
-    findflank.add_argument("--max", required=False, nargs=1, type=int, default=[60],
-                           help="clip results to this length [60]")
-    findflank.add_argument("--min", required=False, nargs=1, type=int, default=[25],
-                           help="minimum read length [25]")
-    findflank.add_argument("--motif1", required=False, nargs=1, type=str, default=['TCAGAAAACTTTGCAACAGAACC'],
+FIND_FLANK_MODE   = 'find_flank'
+EXTRACT_BAM_MODE  = 'bam_extract'
+FULL_PROCESS_MODE = 'full_process'
+TABLE_MERGE       = 'table_merge'
+
+ap = configargparse.ArgumentParser(
+    prog="pimms2",
+    add_config_file_help=False,
+    config_file_parser_class=configargparse.DefaultConfigFileParser,
+    epilog="\n\n*** N.B. This is a development version ***\n \n ",
+    description='''description here''' )
+    
+ap.add_argument('-v', '--version', action='version', version='%(prog)s 2.1 demo')
+
+modes = ap.add_subparsers(parser_class=configargparse.ArgParser, dest='command')
+
+findflank = modes.add_parser(FIND_FLANK_MODE, 
+                             add_config_file_help = False,
+                             help                 = "Mode: find read regions flanking the IS sequence by mapping them to the target genome",
+                             description          = "Args that start with '--' (eg. --fasta) can also be set in a config file (specified via -c)")
+
+samcoords = modes.add_parser(EXTRACT_BAM_MODE, 
+                             add_config_file_help = False,
+                             help                 = "Mode: extract insertion site coordinates from bam file",
+                             description          = "Args that start with '--' (eg. --fasta) can also be set in a config file (specified via -c)")
+
+tablemerge = modes.add_parser(TABLE_MERGE, 
+                              add_config_file_help = False,
+                              help                 = 'Mode: merge two compatible PIMMS results tables '
+                              '(N.B: this step does a simple table join and does not check the data)').add_mutually_exclusive_group()
+
+fullprocess = modes.add_parser(FULL_PROCESS_MODE, 
+                               add_config_file_help = False,
+                               help                 = f"Mode: {FIND_FLANK_MODE} + {EXTRACT_BAM_MODE}",
+                               description          = "Args that start with '--' (eg. --fasta) can also be set in a config file (specified via -c)")
+
+# GENERAL ARGS
+
+for subparser in [ findflank
+                  ,samcoords
+                  ,fullprocess]:
+
+    subparser.add_argument("-c", "--config", 
+                           required       = False, 
+                           is_config_file = True,  # dest='config_file',
+                           metavar        = 'pimms2.config',
+                           help           = "use parameters from config file")
+
+    subparser.add_argument("--nano", 
+                           required = False, 
+                           action   = 'store_true', 
+                           default  = False,
+                           help     = "override with settings more suitable for nanopore")
+
+    subparser.add_argument("--label", 
+                           required = False, 
+                           metavar  = 'condition_name', 
+                           default  = '',
+                           help     = "identifying text tag to add to results file")
+
+
+# FIND_FLANK ARGS
+# to fix: nargs='?' deal with mistaken use of nargs=1 which give a single element list
+
+for subparser in [ findflank
+                  ,fullprocess ]:
+
+    subparser.add_argument("--fasta", 
+                           required = False, 
+                           metavar  = 'ref_genome.fasta', 
+                           type     = extant_file,
+                           help     = "fasta file for reference genome ")
+
+    subparser.add_argument("--qual_char", 
+                           required = False, 
+                           nargs    = '?', 
+                           type     = str, 
+                           default  = '0', 
+                           choices  = [chr(x + 33) for x in list(range(12, 31))],
+                           help     = "substitute a quality score ascii character when fasta read files used (nanopore only) (phred +33: ascii +:?) ['0']")
+
+    subparser.add_argument("--nomap", 
+                           required = False, 
+                           action   = 'store_true', 
+                           default  = False,
+                           help     = "do not run mapping step")
+
+    subparser.add_argument("--mapper", 
+                           required = False, 
+                           nargs    = '?', 
+                           type     = str, 
+                           default  = 'bwa', 
+                           choices  = ['minimap2', 'bwa'],
+                           help     = "select mapping software from available options")
+
+    subparser.add_argument("--single", 
+                           required = False, 
+                           action   = 'store_true', 
+                           default  = False,
+                           help     = "only single direction Illumina data provided")
+
+    subparser.add_argument("--keep", 
+                           required = False, 
+                           action   = 'store_true', 
+                           default  = False,
+                           help     = "keep intermediate fastq files etc for diagnostic purposes")
+
+    subparser.add_argument("--lev", 
+                           required = False, 
+                           type     = int, 
+                           default  = 0,
+                           help     = "use Levenshtein distance (combined insert|del|sub score) [0]")
+
+    subparser.add_argument("--sub", 
+                           required = False, 
+                           type     = int, 
+                           default  = 0, # defaulted to 0 for consistency
+                           help     = "number of permitted base substitutions in motif match [0]")
+
+    subparser.add_argument("--insert", 
+                           required = False, 
+                           type     = int, 
+                           default  = 0,
+                           help     = "number of permitted base insertions in motif match [0]")
+
+    subparser.add_argument("--del", 
+                           required = False, 
+                           type     = int, 
+                           default  = 0, 
+                           dest     = 'deletion',
+                           help     = "number of permitted base deletions in motif match [0]")
+
+    subparser.add_argument("--in_dir", 
+                           required = True, 
+                           dest     = 'in_dir', 
+                           type     = extant_file,
+                           help     = "directory containing input fastq files (assumed to match '*q.gz' or '*.fastq')")
+
+    subparser.add_argument("--fwdrev", 
+                           required = False, 
+                           type     = str, 
+                           default  = '_R1_,_R2_',
+                           help     = "text substring to uniquely identify illumina fwd/rev paired fastq files ['_R1_,_R2_']")
+
+    subparser.add_argument("--out_dir", 
+                           required = False, 
+                           metavar  = 'out_dir', 
+                           default  = None,
+                           action   = 'store',
+                           help     = "directory to contain result files ['pimms2_`label`_`dmy`_`HMS`']")
+
+    subparser.add_argument("--cpus", 
+                           required = False, 
+                           type     = int,
+                           default  = int(os.cpu_count() / 2),
+                           help     = "number of processors to use [(os.cpu_count() / 2)] ")
+
+    subparser.add_argument("--max", 
+                           required = False, 
+                           type     = int, 
+                           default  = 60,
+                           help     = "clip results to this length [60]")
+
+    subparser.add_argument("--min", 
+                           required = False, 
+                           type     = int, 
+                           default  = 25,
+                           help     = "minimum read length [25]")
+
+    subparser.add_argument("--motif1", 
+                           required = False, 
+                           nargs    = 1, 
+                           type     = str, 
+                           default  = ['TCAGAAAACTTTGCAACAGAACC'],
                            # revcomp: GGTTCTGTTGCAAAGTTTTCTGA
-                           help="IS end reference motif1 [TCAGAAAACTTTGCAACAGAACC](pGh9)")
-    findflank.add_argument("--motif2", required=False, nargs=1, type=str, default=['GGTTCTGTTGCAAAGTTTAAAAA'],
+                           help     = "IS end reference motif1 [TCAGAAAACTTTGCAACAGAACC](pGh9)")
+
+    subparser.add_argument("--motif2", 
+                           required = False, 
+                           nargs    = 1, 
+                           type     = str, 
+                           default  = ['GGTTCTGTTGCAAAGTTTAAAAA'],
                            # revcomp: TTTTTAAACTTTGCAACAGAACC
-                           help="IS end reference motif2 [GGTTCTGTTGCAAAGTTTAAAAA](pGh9)")
-    findflank.add_argument("--label", required=True, nargs=1, metavar='condition_name', default=[''],
-                           help="identifying text tag to add to results file")
+                           help     = "IS end reference motif2 [GGTTCTGTTGCAAAGTTTAAAAA](pGh9)")
 
-    # SAM EXTRACT args
-    samcoords.add_argument("-c", "--config", required=False, is_config_file=True,
-                           metavar='pimms2.config',
-                           help="use parameters from config file")
-    samcoords.add_argument("--bam", required=True, nargs=1, metavar='pimms.bam/sam', type=extant_file,
-                           help="bam/sam file of mapped IS flanking sequences ")
-    samcoords.add_argument("--nano", required=False, action='store_true', default=False,
-                           help="override with settings more suitable for nanopore")
-    samcoords.add_argument("--label", required=True, nargs=1, metavar='condition_name', default=[''],
-                           help="text tag to add to results file")
-    samcoords.add_argument("--mismatch", required=False, nargs=1, type=float, metavar='float', default=[None],
-                           choices=[round(x * 0.01, 2) for x in range(0, 21)],
-                           help="fraction of permitted mismatches in mapped read ( 0 <= mismatch < 0.2) [no filter]")
-    samcoords.add_argument("--min_depth", required=False, nargs=1, type=int, default=[2], metavar='int',
-                           help="minimum read depth at insertion site >= int [2]")
-    samcoords.add_argument("--noreps", required=False, action='store_true', default=False,
-                           help="do not separate illumina read groups as replicate insertion count columns")
-    samcoords.add_argument("--gff", required=True, nargs=1, type=extant_file, default='', metavar='genome.gff',
-                           help="GFF3 formatted file to use\n(note fasta sequence present in the file must be deleted before use)")
-    samcoords.add_argument("--gff_extra", required=False, nargs=1, type=str, default='', metavar="'x,y,z'",
-                           help="comma separated list of extra fields to include from the GFF3 annotation\ne.g. 'ID,translation,note' ")
-    samcoords.add_argument("--gff_force", required=False, action='store_true', default=False,
-                           help="override GFF/BAM seq id discrepancies e.g. use when the gff has a plasmid not present in the reference sequence or vice-versa")
-    samcoords.add_argument("--out_fmt", required=False, nargs=1, type=str, default=['xlsx'],
-                           choices=['xlsx', 'tsv', 'csv'],
-                           help="set results table file format tab/comma separated or Excel (tsv|csv|xlsx) [xlsx]")
 
-    # TABLE_MERGE args
-    tablemerge.add_argument("--xlsx", required=False, nargs=2, type=extant_file,
-                            help="2x .xlsx Excel files")
-    tablemerge.add_argument("--csv", required=False, nargs=2, type=extant_file,
-                            help="2x .csv comma separated text/table files")
-    tablemerge.add_argument("--tsv", required=False, nargs=2, type=extant_file,
-                            help='2x .tsv tab (\\t) separated text/table files')
+# BAM EXTRACT ARGS
 
-    # FULL_PROCESS ##########################
-    fullprocess.add_argument("-c", "--config", required=False, is_config_file=True,
-                             metavar='pimms2_run.config',
-                             help="use parameters from config file")
-    fullprocess.add_argument("--nano", required=False, action='store_true', default=False,
-                             help="override with settings more suitable for nanopore")
-    fullprocess.add_argument("--qual_char", required=False, nargs='?', type=str, default='0', choices=[chr(x + 33) for x in list(range(12, 31))],
-                             help="substitute a quality score ascii character when fasta read files used (nanopore only) (phred +33: ascii +:?) ['0']")
-    fullprocess.add_argument("--fasta", required=False, nargs=1, metavar='ref_genome.fasta', type=extant_file,
-                             help="fasta file for reference genome ")
-    fullprocess.add_argument("--nomap", required=False, action='store_true', default=False,
-                             help="do not run mapping step")
-    fullprocess.add_argument("--mapper", required=False, nargs='?', type=str, default='bwa', choices=['minimap2', 'bwa'],
-                             help="select mapping software from available options")
-    fullprocess.add_argument("--single", required=False, action='store_true', default=False,
-                             help="only single direction Illumina data provided")
-    fullprocess.add_argument("--keep", required=False, action='store_true', default=False,
-                             help="keep intermediate files for diagnostic purposes")
-    fullprocess.add_argument("--lev", required=False, nargs=1, type=int, default=[0],
-                             help="use Levenshtein distance (combined insert|del|sub score)")
-    fullprocess.add_argument("--sub", required=False, nargs=1, type=int, default=[1],
-                             help="number of permitted base substitutions in motif match [1]")
-    fullprocess.add_argument("--insert", required=False, nargs=1, type=int, default=[0],
-                             help="number of permitted base insertions in motif match [0]")
-    fullprocess.add_argument("--del", required=False, nargs=1, type=int, default=[0], dest='deletion',
-                             help="number of permitted base insertions in motif match [0]")
-    fullprocess.add_argument("--in_dir", required=True, nargs=1, dest='in_dir', type=extant_file,
-                             help="directory containing input fastq files (assumed to match '*q.gz' or '*.fastq')")
-    fullprocess.add_argument("--fwdrev", required=False, nargs=1, type=str, default=['_R1_,_R2_'],
-                             help="text substring to uniquely identify illumina fwd/rev paired fastq files ['_R1_,_R2_']")
-    fullprocess.add_argument("--out_dir", required=False, nargs=1, metavar='out_dir', default=[''],
-                             action='store',
-                             help="directory to contain result files ['pimms2_`label`_`dmy`_`HMS`']")
-    fullprocess.add_argument("--cpus", required=False, nargs=1, type=int,  # default=int(4),
-                             default=[int(os.cpu_count() / 2)],
-                             help="number of processors to use [(os.cpu_count() / 2)] ")
-    fullprocess.add_argument("--max", required=False, nargs=1, type=int, default=[60],
-                             help="clip results to this length [60]")
-    fullprocess.add_argument("--min", required=False, nargs=1, type=int, default=[25],
-                             help="minimum read length [25]")
-    fullprocess.add_argument("--motif1", required=False, nargs=1, type=str, default=['TCAGAAAACTTTGCAACAGAACC'],
-                             # revcomp: GGTTCTGTTGCAAAGTTTTCTGA
-                             help="IS end reference motif1 [TCAGAAAACTTTGCAACAGAACC](pGh9)")
-    fullprocess.add_argument("--motif2", required=False, nargs=1, type=str, default=['GGTTCTGTTGCAAAGTTTAAAAA'],
-                             # revcomp: TTTTTAAACTTTGCAACAGAACC
-                             help="IS end reference motif2 [GGTTCTGTTGCAAAGTTTAAAAA](pGh9)")
-    fullprocess.add_argument("--label", required=True, nargs=1, metavar='condition_name', default=[''],
-                             help="identifying text tag to add to results file")
-    fullprocess.add_argument("--bam", required=False, nargs=1, metavar='pimms.bam/sam',  # type=extant_file,
-                             type=str, default=['bam?'],
-                             help=configargparse.SUPPRESS)
-    # samcoords.add_argument("--nano", required=False, action='store_true', default=False,
-    #                       help="override with settings more suitable for nanopore")
-    # samcoords.add_argument("--label", required=False, nargs=1, metavar='condition_name', default=[''],
-    #                       help="text tag to add to results file")
-    fullprocess.add_argument("--mismatch", required=False, nargs=1, type=float, metavar='float', default=[None],
-                             choices=[round(x * 0.01, 2) for x in range(0, 21)],
-                             help="fraction of permitted mismatches in mapped read ( 0 <= mismatch < 0.2) [no filter]")
-    fullprocess.add_argument("--min_depth", required=False, nargs=1, type=int, default=[2], metavar='int',
-                             help="minimum read depth at insertion site >= int [2]")
-    fullprocess.add_argument("--noreps", required=False, action='store_true', default=False,
-                             help="do not separate illumina read groups as replicate insertion count columns")
-    fullprocess.add_argument("--gff", required=True, nargs=1, type=extant_file, default='', metavar='genome.gff',
-                             help="GFF3 formatted file to use\n(note fasta sequence present in the file must be deleted before use)")
-    fullprocess.add_argument("--gff_extra", required=False, nargs=1, type=str, default='', metavar="'x,y,z'",
-                             help="comma separated list of extra fields to include from the GFF3 annotation\ne.g. 'ID,translation,note' ")
-    fullprocess.add_argument("--gff_force", required=False, action='store_true', default=False,
-                             help="override GFF/BAM seq id discrepancies "
-                                  "e.g. use when the gff has a plasmid not present in the reference sequence or vice-versa")
-    fullprocess.add_argument("--out_fmt", required=False, nargs=1, type=str, default=['xlsx'],
-                             choices=['xlsx', 'tsv', 'csv'],
-                             help="set results table file format tab/comma separated or Excel (tsv|csv|xlsx) [xlsx]")
+for subparser in [ samcoords
+                  ,fullprocess ]:
 
-    local_parsed_args = ap.parse_known_args()
+    subparser.add_argument("--bam", 
+                           # exceptions for this option if bam extract only or full process
+                           required = True if subparser == samcoords else False, 
+                           metavar  = 'pimms.bam/sam', 
+                           type     = extant_file,
+                           help     = "bam/sam file of mapped IS flanking sequences " if subparser == samcoords else configargparse.SUPPRESS )
+
+    ##@@ remove confusing mismatch parameter
+    # subparser.add_argument("--mismatch",
+    #                        required = False,
+    #                        type     = float,
+    #                        metavar  = 'float',
+    #                        default  = None,
+    #                        choices  = [round(x * 0.01, 2) for x in range(0, 21)],
+    #                        help     = "fraction of permitted mismatches in mapped read ( 0 <= mismatch < 0.2) [no filter]")
+
+    subparser.add_argument("--target_dup_offset",
+                           required = False,
+                           type     = int,
+                           default  = 4,
+                           metavar  = 'int',
+                           help     = "target duplication offset (half duplication length)  int [4]")
+
+    subparser.add_argument("--min_depth", 
+                           required = False, 
+                           type     = int, 
+                           default  = 2, 
+                           metavar  = 'int',
+                           help     = "minimum read depth at insertion site >= int [2]")
+
+    subparser.add_argument("--noreps", 
+                           required = False, 
+                           action   = 'store_true', 
+                           default  = False,
+                           help     = "do not separate illumina read groups as replicate insertion count columns")
+
+    subparser.add_argument("--gff", 
+                           required = True, 
+                           type     = extant_file, 
+                           metavar  = 'genome.gff',
+                           help     = "GFF3 formatted file to use\n(note fasta sequence present in the file must be deleted before use)")
+
+    subparser.add_argument("--gff_extra", 
+                           required = False, 
+                           type     = str, 
+                           default  = [], 
+                           metavar  = "'x,y,z'",
+                           help     = "comma separated list of extra fields to include from the GFF3 annotation\ne.g. 'ID,translation,note' ")
+
+    subparser.add_argument("--gff_force", 
+                           required = False, 
+                           action   = 'store_true', 
+                           default  = False,
+                           help     = "override GFF/BAM seq id discrepancies e.g. use when the gff has a plasmid not present in the reference sequence or vice-versa")
+
+    subparser.add_argument("--out_fmt", 
+                           required = False, 
+                           type     = str, 
+                           default  = 'xlsx',
+                           choices  = ['xlsx', 'tsv', 'csv'],
+                           help     = "set results table file format tab/comma separated or Excel (tsv|csv|xlsx) [xlsx]")
+
+
+# TABLE_MERGE ARGS
+
+tablemerge.add_argument("--xlsx", 
+                        required = False, 
+                        nargs    = 2, 
+                        type     = extant_file,
+                        help     = "2x .xlsx Excel files")
+
+tablemerge.add_argument("--csv", 
+                        required = False, 
+                        nargs    = 2, 
+                        type     = extant_file,
+                        help     = "2x .csv comma separated text/table files")
+
+tablemerge.add_argument("--tsv", 
+                        required = False, 
+                        nargs    = 2, 
+                        type     = extant_file,
+                        help     = '2x .tsv tab (\\t) separated text/table files')
+
+
+parsed_args = ap.parse_known_args()
+
+# check mode specified & at least one relevant flag/argument
+if len(sys.argv) <= 2:
+    # show usage message & exit
+    ap.print_usage()
+    sys.exit(1)
+
+# show command line arguments specified
+else:
     print("-----------------")
     ap.print_values()
     print("-----------------")
-    # print(ap.format_values())
-    print(local_parsed_args)
-    print("-----------------")
-    #
 
-    # exit and print short help message if no mode/arguments supplied
-    if len(sys.argv) <= 2:
-        ap.print_usage()
-        sys.exit(1)
 
-    if local_parsed_args[0].command == 'find_flank':
-        if not local_parsed_args[0].nomap:
-            prog_in_path_check(local_parsed_args[0].mapper)
-            # prog_in_path_check('bwa')
-            if local_parsed_args[0].fasta is None:
-                ap.error("unless the --nomap flag is used please supply a sequence file e.g:  --fasta contigs.fasta")
-            elif not local_parsed_args[0].label:
-                ap.error("unless the --nomap flag is used please supply a text label string  --label cond_01")
+MODE_SELECTED = parsed_args[0].command
+
+# show start message
+print( pimms_mssg.format(MODE_SELECTED) )
+
+
+
+
+
+
+
+
+
+
+######################
+# FIND_FLANK COMMAND #
+######################
+
+def pimms_fastq(fqin_filename, fqout_filename ):
+
+    # create complement dna translation matrix
+    trans = str.maketrans('ATGCN', 'TACGN')
+
+    # create motif type counts
+    count = 0
+    countqmulti = 0
+    countqqrc = 0
+    countq1q2 = 0
+    wrongq2q1 = 0
+    countq2rcq1rc = 0
+    wrongq1rcq2rc = 0
+    countq1 = 0
+    countq1rc = 0
+    countq2 = 0
+    countq2rc = 0
+
+    count_hits = { 'hit_q1_q2':     0, 'hit_but_short_q1_q2':     0,
+                   'hit_q2rc_q1rc': 0, 'hit_but_short_q2rc_q1rc': 0,
+
+                   'hit_q1_only':   0, 'hit_but_short_q1_only':   0,
+                   'hit_q1rc_only': 0, 'hit_but_short_q1rc_only': 0,
+                   
+                   'hit_q2_only':   0, 'hit_but_short_q2_only':   0,
+                   'hit_q2rc_only': 0, 'hit_but_short_q2rc_only': 0 }
+
+    with pysam.FastxFile(fqin_filename, persist=False) as fin, open(fqout_filename, mode='wt') as fout:
+
+        for entry in fin:
+
+            # count fastq processed
+            count += 1
+
+            # specify transposon motif query; forward
+            qry1 = parsed_args[0].motif1[0].strip("'\"")
+            qry2 = parsed_args[0].motif2[0].strip("'\"")
+
+            # specify transposon motif query; reverse complement
+            qry1rc = qry1.translate(trans)[::-1]
+            qry2rc = qry2.translate(trans)[::-1]
+            
+            # find transposon motif matches for each query
+            matchseqs = [ find_near_matches(qry, 
+                                            entry.sequence,                         # function defaults are None
+                                            max_substitutions = SUBSTITUTIONS if not FUZZY_LEVENSHTEIN else None,
+                                            max_deletions     = DELETIONS     if not FUZZY_LEVENSHTEIN else None,
+                                            max_insertions    = INSERTIONS    if not FUZZY_LEVENSHTEIN else None,
+                                            max_l_dist        = L_DIST        if     FUZZY_LEVENSHTEIN else None )
+                          for qry in [ qry1
+                                      ,qry2
+                                      ,qry1rc
+                                      ,qry2rc ] ]
+            
+            # unpack query matches
+            matchesq1, matchesq2, matchesq1rc, matchesq2rc = matchseqs
+            
+            # check matches found
+            if not any(matchseqs):
+                continue
+
+            # check not multiple matches for same motif
+            if max( len(matches) for matches in matchseqs )  > 1:
+                countqmulti += 1
+                continue
+            
+            # specify further multiple motif match criteria
+            multiple_qqrc_matchseqs = [
+                # multiple matches to same motif ( query & reverse complement )
+                ((len(matchesq1) == 1) and (len(matchesq1rc) == 1)),
+                ((len(matchesq2) == 1) and (len(matchesq2rc) == 1)),
+
+                # multiple matches to two incompatible motifs
+                ((len(matchesq1) == 1) and (len(matchesq2rc) == 1)),
+                ((len(matchesq2) == 1) and (len(matchesq1rc) == 1)) ]
+
+            # check not further multiple motif matches
+            if any(multiple_qqrc_matchseqs):
+                countqqrc += 1
+                continue
+
+
+
+            # process motif match pairs to extract target sequences
+            if (len(matchesq1) == 1) and (len(matchesq2) == 1):
+                countq1q2    += 1
+                capture_start = matchesq1[0].end
+                capture_stop  = matchesq2[0].start
+                hit_key       = 'hit_q1_q2'
+                short_key     = 'hit_but_short_q1_q2' 
+
+                if matchesq2[0].start <= matchesq1[0].end:
+                    wrongq2q1 += 1
+                    continue
+
+                else:
+                    report_fq     = True
+                    report_rc     = False
+
+            elif (len(matchesq1rc) == 1) and (len(matchesq2rc) == 1):
+                countq2rcq1rc += 1
+                capture_start  = matchesq2rc[0].end
+                capture_stop   = matchesq1rc[0].start
+                hit_key        = 'hit_q2rc_q1rc'
+                short_key      = 'hit_but_short_q2rc_q1rc'
+
+                if matchesq1rc[0].start <= matchesq2rc[0].end:
+                    wrongq1rcq2rc += 1
+                    continue
+
+                else:
+                    report_fq      = True
+                    report_rc      = False
+
+
+            # process single motif matches to extract target sequences
+            elif len(matchesq1) == 1:
+                countq1      += 1
+                capture_start = matchesq1[0].end
+                capture_stop  = None  # until end
+                hit_key       = 'hit_q1_only'
+                short_key     = 'hit_but_short_q1_only'
+                report_fq     = True
+                report_rc     = False
+
+
+            elif len(matchesq2rc) == 1:
+                countq2rc    += 1
+                capture_start = matchesq2rc[0].end
+                capture_stop  = None  # until end
+                hit_key       = 'hit_q2rc_only'
+                short_key     = 'hit_but_short_q2rc_only'
+                report_fq     = True
+                report_rc     = False
+
+
+            elif len(matchesq1rc) == 1:
+                countq1rc    += 1
+                capture_start = 0
+                capture_stop  = matchesq1rc[0].start
+                hit_key       = 'hit_q1rc_only'
+                short_key     = 'hit_but_short_q1rc_only'
+                report_fq     = True
+                report_rc     = True
+
+            elif len(matchesq2) == 1:
+                countq2      += 1
+                capture_start = 0
+                capture_stop  = matchesq2[0].start
+                hit_key       = 'hit_q2_only'
+                short_key     = 'hit_but_short_q2_only'
+                report_fq     = True
+                report_rc     = True
+
+            # to catch any match combination not specified above
             else:
-                print("reference seq file provided: " + local_parsed_args[0].fasta[0])
-
-    # print("##########")
-    # print(ap.format_values())  # useful for logging where different settings came from
-    # sys.exit(1)
-    # print("\n\n\n")
-    # print(parsed_args[0].command)
-    # print("----------======")
-    # print(ap.)
-    # sys.exit(1)
-
-    return local_parsed_args
+                report_fq     = False
 
 
-# elif parsed_args[0].command == 'bam_extract':
-def bam_extract_func(parsed_args_be):
-    print(pimms_mssg + parsed_args_be[0].command + pimms_mssg2)
+            # report motif matches
+            if report_fq:
 
-    if parsed_args_be[0].nano:
-        parsed_args_be[0].noreps = True
-    # sort out extra requested gff annotation fields
-    if parsed_args_be[0].gff_extra:
-        # strip any formatting quotes and turn comma separated string into a list of fields
-        gff_extra = parsed_args_be[0].gff_extra[0].strip("'\"").split(',')
+                # extract motif match sequence info
+                captured_seqstring  = str(entry.sequence)[capture_start:capture_stop]
+                captured_qualstring = str(entry.quality )[capture_start:capture_stop]
+
+                # adjust sequence quality scores for nanopore reads as required
+                if NANOPORE_MODE:
+
+                    if len(captured_qualstring) < 5:
+
+                        captured_qualstring = QUAL_CHAR * len(captured_seqstring)
+
+                # record short hit
+                if not len(captured_seqstring) >= MIN_LENGTH:
+
+                    count_hits[short_key] += 1
+
+                # record hit
+                else:
+
+                    count_hits[hit_key] += 1
+
+                    # trim match sequence; as forward
+                    if not report_rc:
+
+                        trimmed_seqstring  = captured_seqstring[0:MAX_LENGTH]
+                        trimmed_qualstring = captured_qualstring[0:MAX_LENGTH]
+
+                    # trim match sequence; as reverse complement
+                    else:
+
+                        trimmed_seqstring = captured_seqstring[-MAX_LENGTH:].translate(trans)[::-1]
+                        trimmed_qualstring = captured_qualstring[-MAX_LENGTH:][::-1]
+
+                    # ouput fastq
+                    fout.write(f'@{str(entry.name)} CO:Z:{str(entry.comment)}\n')
+                    fout.write(f'{trimmed_seqstring}\n')
+                    fout.write('+\n')
+                    fout.write(f'{trimmed_qualstring}\n')
+
+    # specify log file
+    log_file = f'{LOG_DIR}/log_{os.getppid()}_{multiprocessing.current_process().pid}_{random.randint(1000, 9999)}.txt'
+
+    # open log & record summary
+    with open( log_file, mode='w' ) as log:
+
+        try:
+
+            # extract relevant hit counts
+            both_motif_total_counts = itemgetter( 'hit_q1_q2',
+                                                  'hit_q2rc_q1rc',
+                                                  'hit_but_short_q1_q2',
+                                                  'hit_but_short_q2rc_q1rc' )(count_hits)
+
+            both_motif_passed_counts = itemgetter( 'hit_q1_q2',
+                                                   'hit_q2rc_q1rc' )(count_hits)
+
+            sing_motif_passed_counts = itemgetter( 'hit_q1_only',
+                                                   'hit_q2_only', 
+                                                   'hit_q1rc_only', 
+                                                   'hit_q2rc_only' )(count_hits)
+
+            total_motif_passed_counts = both_motif_passed_counts + sing_motif_passed_counts
+
+            # specify relevant headers / counts
+            log_info = [ ( 'fastq',                              os.path.basename(fqin_filename)  ),
+                         ( 'read count',                         count                            ),
+                         ( 'multimatched',                       countqmulti                      ),
+                         ( 'mismatched',                         countqqrc                        ),
+                         ( 'fwd|rev matched',                    sum( both_motif_total_counts   ) ),
+                         ( f'fwd|rev matched >= {MIN_LENGTH}bp', sum( both_motif_passed_counts  ) ),
+                         ( f'single matched >= {MIN_LENGTH}bp',  sum( sing_motif_passed_counts  ) ),
+                         ( 'total matched',                      sum( total_motif_passed_counts ) ) ]
+        
+            # extract headers / counts
+            log_info = zip( *log_info )
+
+            for info in log_info:
+
+                print( *info, sep='\t', file=log )
+
+        except Exception as e:
+
+            log.write(f'ERROR: {e} problem with motif matching to {fqin_filename}!\n')
+
+        # log closes automatically at 'with' 'as' end
+
+
+# define general mode arguments
+if MODE_SELECTED in [FIND_FLANK_MODE, EXTRACT_BAM_MODE, FULL_PROCESS_MODE]:
+
+    NANOPORE_MODE    = parsed_args[0].nano
+    RESULTS_LABEL    = parsed_args[0].label
+
+
+
+# run find flank functions
+if MODE_SELECTED in [FIND_FLANK_MODE, FULL_PROCESS_MODE]:
+
+    # define specific find flank mode arguments
+    NCPUS             = parsed_args[0].cpus
+    
+    IN_DIR            = parsed_args[0].in_dir
+    OUT_DIR           = parsed_args[0].out_dir
+
+    L_DIST            = parsed_args[0].lev
+    MIN_LENGTH        = parsed_args[0].min
+    MAX_LENGTH        = parsed_args[0].max
+
+    SINGLE_END_MODE   = parsed_args[0].single
+
+    FWDREV_IDS        = parsed_args[0].fwdrev
+    
+    SKIP_MAPPING     = parsed_args[0].nomap
+    REFERENCE_PATH   = parsed_args[0].fasta
+    MAPPING_SOFTWARE = parsed_args[0].mapper
+
+    KEEP_ALL_FILES   = parsed_args[0].keep
+
+    ##### do we also need to overide L_DIST to 1 for NANOPORE_MODE? currently set as default (0)
+    FUZZY_LEVENSHTEIN = True if NANOPORE_MODE else bool(L_DIST)
+    #####
+
+    QUAL_CHAR         = parsed_args[0].qual_char
+
+    SUBSTITUTIONS     = parsed_args[0].sub
+    INSERTIONS        = parsed_args[0].insert
+    DELETIONS         = parsed_args[0].deletion
+
+
+    # append '/' to input directory as required
+    FASTQ_DIR = os.path.join(IN_DIR, '')
+
+    # specify output / log directory
+    if not OUT_DIR:
+        
+        OUT_DIR = f'./pimms2'
+        
+        if RESULTS_LABEL:
+            
+            OUT_DIR += f'_{RESULTS_LABEL}'
+        
+        OUT_DIR += f'_{time.strftime("%d%m%y_%H%M%S")}'
+
+    LOG_DIR = os.path.join(OUT_DIR, 'logs')
+
+
+    # specify empty file suffix
+    result_suffix = ''
+
+    # append nanopore identifer
+    if NANOPORE_MODE: 
+        
+        result_suffix += '_nano'
+
+    # append max_length info
+    result_suffix += f'_pimms2out_trim{MAX_LENGTH}'
+
+    # append fuzzy match threshold info
+    if FUZZY_LEVENSHTEIN:
+
+        result_suffix += f'_lev{L_DIST}'
+
     else:
-        gff_extra = []
+        
+        # include substitution threshold info
+        result_suffix += f'_sub{SUBSTITUTIONS}'
 
-    # process the gff file to get required fields
-    print("extra gff fields: " + str(gff_extra))
-    gff_file = parsed_args_be[0].gff[0]
-    gff_feat_type = ['CDS', 'tRNA', 'rRNA']
+        # include insert/deletion threshold info
+        if INSERTIONS > 0 | DELETIONS > 0:
+    
+            result_suffix += f'_ins{INSERTIONS}_del{DELETIONS}'
+    
+    # append relevant file extensions
+    result_suffixes = [ f'{result_suffix}.{extension}'
+                          for extension in ( 'fastq', 'sam', 'bam' ) ]
 
-    min_depth_cutoff = parsed_args_be[0].min_depth[0]
-    fraction_mismatch = parsed_args_be[0].mismatch[0]
-    sam_file = parsed_args_be[0].bam[0]
-    condition_label = parsed_args_be[0].label[0]
-    print("\ncond label " + condition_label + "\n")
-
-    # process pimms sam/bam  file and produce coordinate / bed files
-
-    sam_dir, db_rdir, info_rdir = make_results_dirs_in_sam_dir(sam_file, condition_label)
-
-    # process the gff file to get required fields
-    gff_columns_addback, attr_to_columns = process_gff(gff_file, gff_feat_type, gff_extra, info_rdir)
-
-    gff_columns_addback_pseudo, attr_to_columns_pseudo = process_gff(gff_file, ['pseudogene'], [], info_rdir)
-
-    seqid_consistancy_check(gff_columns_addback, sam_file)
-    process_sam(sam_file, min_depth_cutoff, fraction_mismatch)
-
-    sam_stem = modify_sam_stem(sam_file, min_depth_cutoff, fraction_mismatch)
-
-    # allocate insertions to features and create results merged with GFF
-    # possibly poor coding to merge with gff here
-    pimms_result_table_full = coordinates_to_features(sam_stem, attr_to_columns, gff_columns_addback, condition_label,
-                                                      min_depth_cutoff, gff_extra, db_rdir)
-    # if parsed_args[0].nano:
-    #    print("--noreps forced for nanopore data\n")
-    if not parsed_args_be[0].noreps:
-        print("processing read groups as replicates for illumina data\n")
-        mp_reps_feature_counts = coordinates_to_features_reps(sam_stem, attr_to_columns, condition_label)
-        if not mp_reps_feature_counts.empty:
-            merged_with_reps = pimms_result_table_full.merge(mp_reps_feature_counts, on=["seq_id", "start", "end"],
-                                                             how='outer')
-            # how='inner')
-            pimms_result_table_full = merged_with_reps.fillna(0)
-    else:
-        print("not processing read groups as replicates\n")
-
-    if not gff_columns_addback_pseudo.empty:
-        tag_psueudogenes = gff_columns_addback_pseudo['locus_tag']
-        pimms_result_table_full.loc[pimms_result_table_full.locus_tag.isin(tag_psueudogenes), "type"] = \
-            pimms_result_table_full['type'] + '_pseudo'
-
-    # print(parsed_args_be[0].out_fmt[0] + "out_fmt\n")
-    # write results as text/excel
-    if parsed_args_be[0].out_fmt[0] == 'tsv':
-        pimms_result_table_full.to_csv(sam_stem + "_countinfo.tsv", index=False, sep='\t')
-    elif parsed_args_be[0].out_fmt[0] == 'csv':
-        pimms_result_table_full.to_csv(sam_stem + "_countinfo.csv", index=False, sep=',')
-    else:
-        writer = pd.ExcelWriter(sam_stem + '_countinfo.xlsx', engine='xlsxwriter')
-        # Convert the dataframe to an XlsxWriter Excel object.
-        pimms_result_table_full.to_excel(writer, sheet_name='PIMMS2_result', index=False)
-        # Close the Pandas Excel writer and output the Excel file.
-        writer.save()
-
-    os.rename(sam_stem + "_countinfo." + parsed_args_be[0].out_fmt[0], os.path.join(db_rdir, sam_stem + "_countinfo." + parsed_args_be[0].out_fmt[0]))
-    os.rename(sam_stem + "_insert_coords.txt", os.path.join(info_rdir, sam_stem + "_insert_coords.txt"))
-    os.rename(sam_stem + ".bed", os.path.join(info_rdir, sam_stem + ".bed"))
+    # extract final fastq/sam file suffixes
+    fq_result_suffix, sam_result_suffix, bam_result_suffix = result_suffixes
 
 
-# end bam_extract_func
 
 
-def table_merge_func(parsed_args_tm):
-    print(pimms_mssg + parsed_args_tm[0].command + pimms_mssg2)
-    if parsed_args_tm[0].xlsx:
-        print("Join: ", parsed_args_tm[0].xlsx[0], "\t", parsed_args_tm[0].xlsx[1], "\n")
-        # requires  dependancy installed
-        result_df1 = pd.read_excel(parsed_args_tm[0].xlsx[0], engine="openpyxl")
-        result_df2 = pd.read_excel(parsed_args_tm[0].xlsx[1], engine="openpyxl")
-        results_merged = pd.DataFrame.merge(result_df1, result_df2)
-        writer = pd.ExcelWriter('merged_result.xlsx', engine='xlsxwriter')
-        # Convert the dataframe to an XlsxWriter Excel object.
-        results_merged.to_excel(writer, sheet_name='PIMMS2_merged_result', index=False)
-        # Close the Pandas Excel writer and output the Excel file.
-        writer.save()
-    elif parsed_args_tm[0].csv:
-        print("Join: ", parsed_args_tm[0].csv[0], "\t", parsed_args_tm[0].csv[1], "\n")
-        result_df1 = pd.read_csv(parsed_args_tm[0].csv[0]).replace('"', '', regex=True)
-        result_df2 = pd.read_csv(parsed_args_tm[0].csv[1]).replace('"', '', regex=True)
-        results_merged = pd.DataFrame.merge(result_df1, result_df2)
-        results_merged.to_csv('merged_result.csv', index=False)
-    elif parsed_args_tm[0].tsv:
-        print("Join: ", parsed_args_tm[0].tsv[0], "\t", parsed_args_tm[0].tsv[1], "\n")
-        result_df1 = pd.read_csv(parsed_args_tm[0].tsv[0], sep="\t")
-        result_df2 = pd.read_csv(parsed_args_tm[0].tsv[1], sep="\t")
-        results_merged = pd.DataFrame.merge(result_df1, result_df2)
-        results_merged.to_csv('merged_result.txt', index=False, sep="\t")
-    else:
-        print("\nUnable to merge results tables\n")
+# PRE-RUN CHECKS
+
+    # MAPPING CHECKS
+
+    if not SKIP_MAPPING:
+        
+        # inform user that selected mapping software not installed
+        if not shutil.which(MAPPING_SOFTWARE):
+
+            print(f'ERROR: {MAPPING_SOFTWARE.upper()} not found in $PATH.\n')
+            print(f'EXITING: install {MAPPING_SOFTWARE.upper()} or select another mapping software.\n')
+            sys.exit(0)
+
+        # inform user that reference genome not specified
+        if not REFERENCE_PATH:
+            print(f'ERROR: Reference genome not specified.\n')
+            print(f'EXITING: Specify "--fasta /path/to/reference.fasta" or select "--nomap".\n')
+            sys.exit(0)
+
+        # inform user that results label not specified
+        if not RESULTS_LABEL:
+
+            print(f'ERROR: Results label not specified.\n')
+            print(f'EXITING: Specify "--label LABEL_NAME" or select "--nomap".\n')
+            sys.exit(0)    
 
 
-parsed_args = parse_arguments()  # parse command line arguments
 
+    # INPUT FILES CHECK
 
-# FIND_FLANK ###
-def find_flank_func(parsed_args_ff):
-    # if parsed_args[0].command == 'find_flank':
-    print(pimms_mssg + parsed_args_ff[0].command + pimms_mssg2)
-    # print((vars(parsed_args)))
-    # sys.exit(1)
-    # config_file = parsed_args.config_file[0]
+    # split comma seperate paired read ids
+    FWDREV_IDS = FWDREV_IDS.strip("'\"").split(',')
 
-    # construct config parser
-    # p2config = configparser.ConfigParser()
-    mapper = parsed_args_ff[0].mapper
-    label = parsed_args_ff[0].label[0]
-    print("\nFF label " + label + "\n")
+    # check enough paired read ids
+    if len(FWDREV_IDS) != 2:
 
-    if parsed_args_ff[0].out_dir[0]:
-        out_dir_ff = parsed_args_ff[0].out_dir[0]
-    # print('\ncreating result dir: ' + out_dir + '\n')
-    else:
-        out_dir_ff = 'pimms2_' + label + '_' + time.strftime("%d%m%y_%H%M%S")
-    # print('\ncreating result dir: ' + out_dir + '\n')
-    # createFolder(out_dir)
-
-    if os.path.isdir(out_dir_ff):
-        print('\nresult dir exists\n')
-    else:
-        print('\ncreating result dir: ' + out_dir_ff + '\n')
-        create_folder(out_dir_ff)
-
-    out_dir_logs = os.path.join(out_dir_ff, 'logs')
-    if os.path.isdir(out_dir_logs):  # remove logs from previous runs
-        shutil.rmtree(out_dir_logs)
-
-    create_folder(out_dir_logs)
-
-    fwdrev_wc = parsed_args_ff[0].fwdrev[0].strip("'\"").split(',')
-
-    # exit(0)
-
-    # print(pimms_mls)
-    # dir(parsed_args[0].cpus[0])
-
-    # sys.exit(1)
-    ncpus = int(parsed_args_ff[0].cpus[0])
-    print('ncpus=' + str(ncpus))
-    nano = parsed_args_ff[0].nano
-
-    # experimental decontaminate transposon/vector sequence
-    # not currently effective try another implementation when time allows?
-    # decontam_tranposon = False
-    #  print(parsed_args_ff[0].sub[0])
-    # fuzzy_levenshtein = bool(parsed_args_ff[0].lev[0])
-    # l_dist = parsed_args_ff[0].lev[0]  # maximum Levenstein Distance
-    # fuzzy_levenshtein = bool(l_dist)
-    # set up some variables:
-    if nano:  # nano == True
-        # parsed_args[0].noreps = True
-        fuzzy_levenshtein = True
-        l_dist = parsed_args_ff[0].lev[0]  # maximum Levenshtein Distance
-        # min_length = 50
-        # max_length = 200
-        min_length = parsed_args_ff[0].min[0]  # changed to array
-        max_length = parsed_args_ff[0].max[0]  # changed to array
-    # print('overriding with Nanopore appropriate settings: Levenshtein distance of ' + str(
-    #    l_dist) + ' + sequence length min = ' + str(min_length) + ', max = ' + str(max_length))
+        print(f'ERROR: Inadequate paired reads IDs provided\n')
+        print(f'EXITING: Specify two IDs delimited by a comma i.e. "--fwdrev_wc _ID1_,_ID2_".\n')
+        sys.exit(0)
+    
+    # extract individual foward / reverse read ids
     else:
 
-        l_dist = parsed_args_ff[0].lev[0]  # maximum Levenshtein Distance
-        print(str(l_dist) + '~~~~~~~~~~~~')
-        fuzzy_levenshtein = bool(l_dist)
-        subs = parsed_args_ff[0].sub[0]
-        insrt = parsed_args_ff[0].insert[0]
-        dels = parsed_args_ff[0].deletion[0]
-        min_length = parsed_args_ff[0].min[0]  # changed to array
-        max_length = parsed_args_ff[0].max[0]  # changed to array
+        FWD_ID, REV_ID = FWDREV_IDS
 
-    # set up some names
-    if nano:
-        seqtype = '_nano'
+
+    # specify general search wild cards for fastqs
+    glob_wc = [ "*q.gz", "*.fastq" ]
+    
+    # extend search wild cards to include additional nanopore specific fastq suffixes
+    if NANOPORE_MODE:
+
+        glob_wc.extend([ "*.fasta", "*.fasta.gz" ])
+
+    # create store for found wildcard matches
+    glob_read_files = [] 
+
+    # cycle through search wild cards    
+    for suffix_wc in glob_wc:
+
+        # search fastq directory for wildcard matches
+        wc_matches = glob.glob(f'{FASTQ_DIR}{suffix_wc}')
+
+        # record any wildcard matches in store
+        glob_read_files.extend(wc_matches)
+
+    # check fastqs found
+    if not glob_read_files:
+    
+        print(f'ERROR: No fastqs found in {FASTQ_DIR}.\n')
+        print(f'EXITING: Ensure files have the following suffixes; {" ".join(glob_wc)}\n')
+        sys.exit(0)
+
+    # check fastq paired read id info present 
+    if not NANOPORE_MODE and not SINGLE_END_MODE:                
+
+        paired_ids_found = [ (FWD_ID in fq or REV_ID in fq)
+                             for fq in glob_read_files ]
+
+        if not all(paired_ids_found):
+
+            print(f'ERROR: Not all fastq files contain the paired read IDs "{FWD_ID}" or "{REV_ID}".')
+            print('EXITING: Rename fastq files and/or provide different IDs i.e. "--fwdrev_wc _ID1_,_ID2_".')
+            sys.exit(0)
+
+
+
+
+# DISPLAY RUN SETTINGS
+
+    # show specified settings
+    print(f'\n\t{MODE_SELECTED.upper()} SETTINGS:\n')
+    print(f'\tNumber CPUs:          {NCPUS}')
+    print(f'\tFastq directory:      {IN_DIR}')
+    print(f'\tOutput directory:     {OUT_DIR}')
+    print(f'\tLevenshtein distance: {L_DIST}')
+    print(f'\tFuzzy matching:       {FUZZY_LEVENSHTEIN}')
+    print(f'\tMinimum read length:  {MIN_LENGTH}')
+    print(f'\tMaximum read length:  {MAX_LENGTH}')
+    print(f'\tForward read ID:      {FWD_ID}')
+    print(f'\tReverse read ID:      {REV_ID}')
+    print(f'\tResults label:        {RESULTS_LABEL}')    
+    
+
+    READ_MODE = 'nanopore' if NANOPORE_MODE else 'illumina'
+    
+    # show read type settings
+    print(f'\n\n\tREAD TYPE SETTINGS:\n')
+    print(f'\tRead type:            {READ_MODE}')
+
+    # show nanopore specific settings
+    if NANOPORE_MODE: 
+
+        print(f'\tQuality character:    {QUAL_CHAR}')
+
+    # show illumina specific settings
     else:
-        seqtype = ''
+    
+        print(f'\tSubstitutions:        {SUBSTITUTIONS}')
+        print(f'\tInsertions:           {INSERTIONS}')
+        print(f'\tDeletions:            {DELETIONS}')
 
-    if fuzzy_levenshtein:
-        fq_result_suffix = (seqtype + "_pimms2out_trim" + str(max_length) + "_lev" + str(l_dist) + ".fastq")
-    elif insrt > 0 | dels > 0:
-        fq_result_suffix = (
-                seqtype + "_pimms2out_trim" + str(max_length) + "_sub" + str(subs) + "_ins" + str(insrt) + "_del" + str(dels) + ".fastq")
-    else:
-        fq_result_suffix = (seqtype + "_pimms2out_trim" + str(max_length) + "_sub" + str(subs) + ".fastq")
+    # show mapping specific settings
+    if not SKIP_MAPPING:
 
-    sam_result_suffix = re.sub('.fastq', '.sam', fq_result_suffix)
+        print(f'\n\n\tMAPPING SETTINGS:\n')
+        print(f'\tReference genome:     {REFERENCE_PATH}')
+        print(f'\tMapping Software:     {MAPPING_SOFTWARE}')
+        print(f'\tInstallation used:    $PATH/{MAPPING_SOFTWARE}')
+    
+    print('\n')
 
-    fastq_dir = os.path.join(parsed_args_ff[0].in_dir[0], '')
+
+
+# PREPARE OUTPUTS DIRECTORIES
+
+    # create output directory
+    if not os.path.isdir(OUT_DIR):
+        create_folder(OUT_DIR)
+
+    # remove output logs from previous runs
+    if os.path.isdir(LOG_DIR):  
+        shutil.rmtree(LOG_DIR)
+
+    # create output log directory
+    if not os.path.isdir(LOG_DIR):
+        create_folder(LOG_DIR)
+
+
+
+
+# FILTER READS
+
+    print(f'\n{len(glob_read_files)} input files found:\n')
+    
+    for fq in sorted(glob_read_files):
+
+        fq = os.path.basename(fq)
+        print(f'- {fq}')
+
+    print(f'\n\nPIMMS read filtering started at {datetime.datetime.now()}...\n')
+
+    pi = multiprocessing.Pool(NCPUS)
+
+    for fq in glob_read_files:
+
+        ##### as is likely lead to errors if only 1 suffix & contains (.)?; explicitly remove collective suffixes
+
+        # extract fastq basename
+        fq_basename = Path(fq).stem
+
+        # extract fastq filename i.e. remove fastq suffixes
+        fq_filename = Path(fq_basename).stem
+
+        # specify fastq path
+        fq_processed = os.path.join(OUT_DIR, f'{fq_filename}{fq_result_suffix}')
+
+        print(f'Processing {os.path.basename(fq)} ==> {os.path.basename(fq_processed)}')
+
+        # process fastq?
+        pi.apply_async( pimms_fastq, args=(fq, fq_processed ) )
+
+    pi.close()
+    pi.join()
+
+    print(f"\nPIMMS read filtering completed at {datetime.datetime.now()}...\n")
+
+
+
+# PROCESS FILTERED OUTPUTS
 
     flanking_fastq_result_list = []
 
-    if nano:  # nano == True
+    # find filtered fastqs
 
-        glob_wc = ["*q.gz", "*.fastq", "*.fasta", "*.fasta.gz"]
-        glob_read_files = find_read_files_with_glob(fastq_dir, glob_wc)
-        print(glob_read_files, "...(glob_read_files)...\n")
-        print("nanopore PIMMS read filtering starting...\n")
-        print(datetime.datetime.now())
+    # find filtered files
+    if NANOPORE_MODE or SINGLE_END_MODE:
 
-        pi = multiprocessing.Pool(ncpus)
-        # for fq in glob.glob(fastq_dir + "*[aq].gz"):
-        for fq in glob_read_files:
-            fq_processed = os.path.join(out_dir_ff, Path(Path(fq).stem).stem + fq_result_suffix)
-            flanking_fastq_result_list = flanking_fastq_result_list + [fq_processed]
-            pi.apply_async(pimms_fastq,
-                           # args=(fq, fq_processed, nano)
-                           args=(fq, fq_processed, out_dir_logs, nano)
-                           )
+        # specify filtered fastq search wild card
+        fqs_filtered_wc = os.path.join(OUT_DIR, f'*{fq_result_suffix}')
+    
+        # search output directory for filtered fastq
+        fqs_results = sorted( glob.glob(fqs_filtered_wc) )
+        
+        # store filtered fastq paths
+        flanking_fastq_result_list.extend(fqs_results)
 
-        pi.close()
-        pi.join()
 
-        # pi = multiprocessing.Pool(ncpus)
-        # for fq in glob.glob(fastq_dir + "*.fast[aq]"):
-        #     fq_processed = os.path.join(out_dir_ff, Path(Path(fq).stem).stem + fq_result_suffix)
-        #     flanking_fastq_result_list = flanking_fastq_result_list + [fq_processed]
-        #     pi.apply_async(pimms_fastq,
-        #                    args=(fq, fq_processed)
-        #                    )
-        #
-        # pi.close()
-        # pi.join()
+    # find filtered files & merge paired R1/R2 fastqs from same lanes
+    else:
 
-        print("nanopore PIMMS filtering completed...\n")
-        print(datetime.datetime.now())
+        print(f"\nMerging paired Illumina reads started at {datetime.datetime.now()}...\n")
 
-    else:  # nano == False
+        # specify filtered fastq search wild card
+        fqp_filtered_wc = [ os.path.join(OUT_DIR, f'*{ID}*{fq_result_suffix}')
+                            for ID in [ FWD_ID
+                                        ,REV_ID ] ]
 
-        glob_wc = ["*q.gz", "*.fastq"]
-        glob_read_files = find_read_files_with_glob(fastq_dir, glob_wc)
+        fqp_results = [ sorted(glob.glob(fq_wc))
+                        for fq_wc in fqp_filtered_wc ]
+        
+        fqp_results_fwd, fqp_results_rev = fqp_results
 
-        print("PIMMS read filtering starting...\n")
-        print(datetime.datetime.now())
-        pi = multiprocessing.Pool(ncpus)
-        # for fq in glob.glob(fastq_dir + "*.fastq"):
+        ##### shouldn't assume 1 & 2 mathces found for all i.e. zipped correctly
+        ##### if no reads pass filtering then filtered fastq won't exist
+        for paired_results in zip(fqp_results_fwd, fqp_results_rev):
+        #####
+            fwd_fqp_result, rev_fqp_result = paired_results
 
-        for fq in glob_read_files:
-            if not parsed_args_ff[0].single:
-                # print('fwd/rev Illumina data')
-                if not (fwdrev_wc[0] in fq or fwdrev_wc[1] in fq):
-                    print("ERROR(fastq): text substrings " + fwdrev_wc[0] + "/" + fwdrev_wc[
-                        1] + " NOT FOUND in read filenanes (to identify illumina fwd/rev fastq files)")
-                    print("ERROR(fastq): Check the fastq file names and/or update the --fwdrev parameter")
-                    sys.exit(1)
-            else:
-                print('.')
-                # print('single direction Illumina data')
+            # specify survey fastq info
+            survey_info = { 1: { 'fqout': fwd_fqp_result },
 
-            # sys.exit(1)
-            fq_processed = os.path.join(out_dir_ff, Path(Path(fq).stem).stem + fq_result_suffix)
-            pi.apply_async(pimms_fastq,
-                           args=(fq, fq_processed, out_dir_logs, nano)
-                           )
+                            2: { 'fqout': rev_fqp_result } }
 
-        pi.close()
-        pi.join()
+            # cycle through paired read members
+            for pair_member in survey_info:
 
-        # pi = multiprocessing.Pool(ncpus)
-        # for fq in glob.glob(fastq_dir + "*q.gz"):
-        #     if not (fwdrev_wc[0] in fq or fwdrev_wc[1] in fq):
-        #         print("ERROR(fastq): text substrings " + fwdrev_wc[0] + "/" + fwdrev_wc[
-        #             1] + " NOT FOUND in read filenanes (to identify illumina fwd/rev fastq files)")
-        #         print("ERROR(fastq): Check the fastq file names and/or update the --fwdrev parameter")
-        #         sys.exit(1)
-        #
-        #     fq_processed = os.path.join(out_dir_ff, Path(Path(fq).stem).stem + fq_result_suffix)
-        #     pi.apply_async(pimms_fastq,
-        #                    args=(fq, fq_processed, out_dir_logs)
-        #                    )
-        #
-        # pi.close()
-        # pi.join()
-        print("PIMMS read filtering completed...\n")
-        print(datetime.datetime.now())
+                # extract pair member sub dictionary
+                member_info = survey_info[pair_member]
 
-        # match fwdrev match substrings e.g: _R1_/_R2_ --fwdrev parameter
-        if not parsed_args_ff[0].single:
+                # open pair member filtered fastq
+                with pysam.FastxFile( member_info['fqout'], persist=False ) as fh:
 
-            fqp_results_fwd = sorted(glob.glob(os.path.join(out_dir_ff, "*" + fwdrev_wc[0] + "*" + fq_result_suffix)))
-            fqp_results_rev = sorted(glob.glob(os.path.join(out_dir_ff, "*" + fwdrev_wc[1] + "*" + fq_result_suffix)))
-            print(fqp_results_fwd)
-            print(fqp_results_rev)
-            for fwd_fqp_result, rev_fqp_result in zip(fqp_results_fwd, fqp_results_rev):
-                result1_reads_list = []
-                result2_reads_list = []
-                print(fwd_fqp_result)
-                print(rev_fqp_result)
-                survey_fastq(result1_reads_list, fwd_fqp_result)
-                survey_fastq(result2_reads_list, rev_fqp_result)
-                a = set(result1_reads_list)
-                b = set(result2_reads_list)
-                c = b.difference(a)
+                    # extract extracted names, remove duplicates & store
+                    member_info['names'] = set( entry.name 
+                                                for entry in fh )
 
-                tempfqname = Path(fwd_fqp_result).name
-                # fix so only substring in file name nit dir is updated
-                mrg_fqp_result_filename = os.path.join(Path(fwd_fqp_result).parent,
-                                                       re.sub(fwdrev_wc[0], '_RX_', tempfqname,
-                                                              count=1))  # replace  fwd substring '_R1_'
-                # mrg_fqp_result_filename = re.sub(fwdrev_wc[0], '_RX_', fwd_fqp_result, count=1)
-                flanking_fastq_result_list = flanking_fastq_result_list + [mrg_fqp_result_filename]
-                print(mrg_fqp_result_filename)
-                print(str(len(a)))
-                print(str(len(b)))
-                print(str(len(c)))
-                # pysam bug doesn't parse files gzipped in chunks so gzipping removed here
-                # with pysam.FastxFile(fwd_fqp_result) as fin, gzip.open(mrg_fqp_result_filename, mode='wt') as fout:
-                with pysam.FastxFile(fwd_fqp_result, persist=False) as fin, open(mrg_fqp_result_filename,
-                                                                                 mode='wt') as fout:
-                    for entry in fin:
-                        fout.write((str(entry) + '\n'))
+            # unpack unique read names
+            result_reads_unique = [ survey_info[pair_member]['names']
+                                    for pair_member in sorted( survey_info ) ]
 
-                # with pysam.FastxFile(rev_fqp_result) as fin, gzip.open(mrg_fqp_result_filename, mode='at') as fout:
-                with pysam.FastxFile(rev_fqp_result, persist=False) as fin, open(mrg_fqp_result_filename,
-                                                                                 mode='at') as fout:
-                    for entry in fin:
-                        if entry.name in c:
-                            fout.write((str(entry) + '\n'))
-                            # fout.write(str(entry) + '\n')
+            # extract unique read name sets
+            result1_reads_unique, result2_reads_unique = result_reads_unique
+            
+            # extract unique reverse reads i.e. no forward specific names & no forward/reverse shared names
+            reads_difference = result2_reads_unique.difference(result1_reads_unique)
 
-            # remove intermediate fastq files
-            # if parsed_args[0].rmfiles:
-            if not parsed_args_ff[0].keep:
-                delete_file_list(fqp_results_fwd)
-                delete_file_list(fqp_results_rev)
-            print("illumina merge of fwd/reverse data  completed...\n")
+            # extract filtered fastq basenames
+            fltrd_fq_basenames = [ os.path.basename(path) 
+                                    for path in paired_results]
 
-        else:
-            fqp_results_sing = sorted(glob.glob(os.path.join(out_dir_ff, "*" + fq_result_suffix)))
-            print(fqp_results_sing)
-            flanking_fastq_result_list = fqp_results_sing
-        #  if not parsed_args_ff[0].keep:
-        #      delete_file_list(fqp_results_sing)
+            fwd_fq_basename, rev_fq_basename = fltrd_fq_basenames
 
-    # tidy up
-    print(flanking_fastq_result_list)
-    # concat_result_fastq = concat_fastq(flanking_fastq_result_list, parsed_args[0].label[0], fq_result_suffix, out_dir)
-    concat_result_fastq = concat_fastq_raw(flanking_fastq_result_list, label, fq_result_suffix, out_dir_ff)
+            # extract common fastq prefix
+            fltrd_fq_prefix = os.path.commonprefix(fltrd_fq_basenames)
+            
+            # extract common suffix (invert, extract "prefix" then revert)
+            fltrd_fq_suffix = os.path.commonprefix([ name[::-1] for name in fltrd_fq_basenames])[::-1]
+            
+            # specify merged fastq basename using common prefix/sufix but with distinct ID (X)
+            merged_fq_basename = f'{fltrd_fq_prefix}X{fltrd_fq_suffix}'
+            
+            # specify merged fastq path
+            merged_fqp_result_path = os.path.join( OUT_DIR,
+                                                    merged_fq_basename )
+
+            # store merged fastq results
+            flanking_fastq_result_list.append( merged_fqp_result_path )
+
+            # pysam bug doesn't parse files gzipped in chunks so gzipping removed here
+            
+            ##### as discussed am a bit unsure about logic here. 
+            ##### also should shouldn't lanes be merged and not reads? all gets concatenated later anyhow
+            print(f'Merging {fwd_fq_basename} + {rev_fq_basename} ==> {merged_fq_basename}')
+
+            with open(merged_fqp_result_path, mode='wt') as fout:
+
+                with pysam.FastxFile(fwd_fqp_result, persist=False) as fqfwd:
+
+                    for entry in fqfwd:
+                
+                        # output any forward reads (if unique to forward fastq & shared between paired fastqs)
+                        fout.write(f'{entry}\n')
+
+                with pysam.FastxFile(rev_fqp_result, persist=False) as fqrev:
+
+                    for entry in fqrev:
+
+                        # output reverse reads only (if unique to reverse fastq & NOT shared between paired fastqs)
+                        if entry.name in reads_difference:
+
+                            fout.write(f'{entry}\n')
+        
+        print(f"\nMerging paired Illumina reads completed at {datetime.datetime.now()}...\n")
+
+
+        # remove intermediate fastqs
+        if not KEEP_ALL_FILES:
+
+            print(f"\nRemoving intermediate filtered paired reads\n")
+
+            for intermediates in fqp_results:
+
+                delete_file_list(intermediates)
+
+
+
+    # concatenate filtered fastqs
+
+    # specify concatenated fastq path
+    concat_result_fastq = os.path.join(OUT_DIR,
+                                       f'{RESULTS_LABEL}_RX_concat{fq_result_suffix}.gz')
+
+    ##### probably just use zcat; python module overcomplicating things?
+    with gzip.open(concat_result_fastq, "wt", compresslevel=6) as big_file:
+    #####
+
+        with fileinput.input( files=flanking_fastq_result_list ) as inputs:
+        
+            for line in inputs:
+
+                big_file.write(line)
+
+    if not KEEP_ALL_FILES:
+
+        print('\nRemoving intermediate fastq flanking reads files\n')
+        
+        delete_file_list(flanking_fastq_result_list)
+
 
     # merge logs from different parallel cpus
-    merge_logs(out_dir_logs)
 
-    # do mapping stuff
-    bam_name_ff = ''
-    if parsed_args_ff[0].nomap:
+    # specify log file search wildcard
+    log_wc = os.path.join( LOG_DIR,
+                          "log_*txt" )
+
+    # search for log files
+    log_files = glob.glob( log_wc )
+
+    # reads log files as dataframe
+    df_from_each_log = ( pd.read_table(log) 
+                         for log in log_files )
+
+    # concatenate log files
+    merged_logs_df = pd.concat( df_from_each_log, 
+                                ignore_index=True )
+
+    # sort logs by fastq filename
+    merged_logs_df = merged_logs_df.sort_values( by=['fastq'] )
+    
+    # calculate metric totals
+    log_sums = merged_logs_df.sum(numeric_only=True)
+    
+    log_sums['fastq'] = 'COMBINED'
+    
+    merged_logs_df = merged_logs_df.append(log_sums, ignore_index=True)
+    
+    # specify merged log path
+    merged_log_path = os.path.join( OUT_DIR, 
+                                    'result_summary.txt' )
+    
+    # write merged log
+    merged_logs_df.to_csv( merged_log_path, 
+                           sep='\t', 
+                           index=False )
+    
+    # print filtered metrics to screen
+
+    print('\nMOTIF MATCHES:\n')
+
+    print(f'{merged_logs_df.to_string(index=False)}\n')
+
+
+
+
+# MAP READS
+
+
+    if SKIP_MAPPING: 
+        
         print("Skipping mapping step...\n")
+
+        bam_name = None
+
     else:
-        if mapper == 'minimap2' or nano:
-            sam_output_mm = os.path.splitext(os.path.basename(parsed_args_ff[0].fasta[0]))[0] + '_' + label + re.sub('.sam', '_mm2.sam',
-                                                                                                                     sam_result_suffix)
-            sam_output_mm = os.path.join(out_dir_ff, sam_output_mm)
-            run_minimap2(concat_result_fastq, sam_output_mm, parsed_args_ff[0].fasta[0])
-            bam_name_ff = py_sam_to_bam(sam_output_mm)
-        elif mapper == 'bwa':
-            sam_output_bwa = os.path.splitext(os.path.basename(parsed_args_ff[0].fasta[0]))[0] + '_' + label + re.sub('.sam', '_bwa.sam',
-                                                                                                                      sam_result_suffix)
-            sam_output_bwa = os.path.join(out_dir_ff, sam_output_bwa)
-            run_bwa(concat_result_fastq, sam_output_bwa, parsed_args_ff[0].fasta[0], ncpus)
-            bam_name_ff = py_sam_to_bam(sam_output_bwa)
 
-    return out_dir_ff, bam_name_ff
+        # extract reference directory / filename
+        ref_dir, ref_file = os.path.split( REFERENCE_PATH )
 
+        # extract reference basename
+        ref_basename, *_ = os.path.splitext( ref_file )
 
-# end find_flank_func ###
+        software_info = { 'minimap2': 'mm2'
+                         ,'bwa':      'bwa' }
 
-# FIND_FLANK ###
+        software_id = software_info[MAPPING_SOFTWARE]
+        
+        mapped_files = [ f'{ref_basename}_{software_id}_{RESULTS_LABEL}{suffix}'
+                         for suffix in (sam_result_suffix, bam_result_suffix) ]
 
-if parsed_args[0].command == 'find_flank':
-    out_dir, bam_name = find_flank_func(parsed_args)
+        mapped_paths = [ os.path.join( OUT_DIR, name )   
+                         for name in mapped_files ]
 
-# BAM_EXTRACT ###
+        sam_path, bam_path = mapped_paths
 
-elif parsed_args[0].command == 'bam_extract':
-    bam_extract_func(parsed_args)
+        if MAPPING_SOFTWARE == 'minimap2' or NANOPORE_MODE:
+            
+            # specify mapping mode
+            mm_mode = 'map-ont' if NANOPORE_MODE else 'sr'
 
-
-# TABLE_MERGE ###
-
-elif parsed_args[0].command == 'table_merge':
-    table_merge_func(parsed_args)
+            # specify minimap2 command       
+            map_cmd = f'minimap2 -x {mm_mode} -a -y -o {sam_path} {REFERENCE_PATH} {concat_result_fastq} --secondary=no --sam-hit-only'
 
 
-# FULL_PROCESS ###
+        elif MAPPING_SOFTWARE == 'bwa':
 
-elif parsed_args[0].command == 'full_process':
-    out_dir, bam_name = find_flank_func(parsed_args)
-    parsed_args[0].out_dir[0] = out_dir
-    parsed_args[0].bam[0] = bam_name
-    bam_extract_func(parsed_args)
+            idx_dir = f'{ref_basename}_index'
+
+            # specify index directory reference path
+            idx_ref_path = os.path.join( idx_dir,
+                                         ref_file )
+
+            idx_sa_path = os.path.join( idx_dir,
+                                        f'{ref_file}.sa' )
+            
+            if os.path.exists(idx_sa_path):
+                
+                print('Using existing BWA index...')
+            
+            else:
+
+                print('Creating BWA index...')
+
+                create_folder(idx_dir)
+                
+                # copy reference fasta to index directory
+                shutil.copyfile( REFERENCE_PATH, 
+                                 idx_ref_path)
+
+                # specify bwa index command
+                idx_cmd = f'bwa index {idx_ref_path}'
+
+                # genereate index
+                print(f'RUNNING: {idx_cmd}')
+                process = subprocess.Popen( idx_cmd.split(' '), 
+                                            stdout=subprocess.PIPE, 
+                                            stderr=subprocess.PIPE )
+                stdout, stderr = process.communicate()
+                print(stdout.decode('utf-8'))
+                print(stderr.decode('utf-8'))
+
+            # specify bwa command
+            map_cmd = f'bwa mem -t {NCPUS} -C -o {sam_path} {idx_ref_path} {concat_result_fastq}'
+
+
+        # perform mapping
+        print(f'RUNNING: {map_cmd}')
+        process = subprocess.Popen( map_cmd.split(' '), 
+                                    stdout=subprocess.PIPE, 
+                                    stderr=subprocess.PIPE )
+        stdout, stderr = process.communicate()
+        print(stdout.decode('utf-8'))
+        print(stderr.decode('utf-8'))
+
+
+        # CONVERT SAM -> BAM
+
+        # add?? line to remove unmapped readsbased on: | samtools view -F 4 -o onlyMapped.bam ??
+        # noinspection PyUnresolvedReferences
+        pysam.sort( '-O', 'BAM', "-o", bam_path, sam_path )
+
+        # noinspection PyUnresolvedReferences
+        pysam.index( bam_path )
+
+        print('\nMapping stats (flagstat):\n')
+
+        # noinspection PyUnresolvedReferences
+        for fsline in pysam.flagstat(bam_path).splitlines()[:5]:
+
+            print(fsline)
+        
+        # remove intermediate sam
+        if not KEEP_ALL_FILES:
+
+            delete_file_list([sam_path])
+
+
+
+
+
+
+
+
+
+
+#######################
+# BAM_EXTRACT COMMAND #
+#######################
+
+# run bam extract functions
+if MODE_SELECTED in [ EXTRACT_BAM_MODE, FULL_PROCESS_MODE ]:
+        
+
+    # define specific bam extract mode arguments
+
+    MIN_DEPTH         = parsed_args[0].min_depth
+
+    TARGET_DUP_OFFSET = parsed_args[0].target_dup_offset
+    ##@@ FRACTION_MISMATCH = parsed_args[0].mism
+    # BAM_PATH          = parsed_args[0].bam    if EXTRACT_BAM_MODE else bam_path
+    BAM_PATH          = parsed_args[0].bam    if MODE_SELECTED == EXTRACT_BAM_MODE else bam_path
+
+    # print(f'BAM_PATH: {BAM_PATH}')
+    # print(f'bam_path: {bam_path}')
+    # print(f'MODE_SELECTED: {MODE_SELECTED}')
+
+    SKIP_REPS         = parsed_args[0].noreps if not NANOPORE_MODE else True
+
+    GFF_PATH          = parsed_args[0].gff
+
+    GFF_EXTRA         = parsed_args[0].gff_extra
+    
+    GFF_FORCE         = parsed_args[0].gff_force
+    
+    OUT_FORMAT        = parsed_args[0].out_fmt
+    
+    # convert fields to list
+    if GFF_EXTRA:
+
+        GFF_EXTRA = GFF_EXTRA.strip("'\"").split(',')  
+
+    OUT_DIR = os.path.dirname( BAM_PATH )
+    
+    # N.B. same as outdir specified in find_flank mode
+
+    GFF_name = os.path.basename( GFF_PATH )
+
+    GFF_basename, *_ = os.path.splitext( GFF_name )
+
+
+    # extract alignment file name
+    BAM_basename = os.path.basename( BAM_PATH )
+
+    # remove alignment file extension
+    BAM_filename, *_ = os.path.splitext( BAM_basename )
+
+    # append depth & mismatch info
+    ##@@ BAM_filename += f'_md{MIN_DEPTH}_mm{FRACTION_MISMATCH or 0}'
+    BAM_filename += f'_md{MIN_DEPTH}'
+
+
+
+    # specify out subdirectory labels
+    out_subdir_labels    = ( 'out_dashboard','out_info' )
+
+    # specify results subdirectory labels
+    timeinfo = time.strftime("%d%m%y_%H%M%S")
+    result_subdir_labels = (f'{timeinfo}_results_dashboard', f'{timeinfo}_results_info' )
+
+    # specify output subdirectory paths
+    subdirs = [ [ os.path.join(OUT_DIR, f'{RESULTS_LABEL}_{label}' ) for label in labels ] 
+
+                  for labels in [ out_subdir_labels, result_subdir_labels ] ]
+    
+    # unpack different subdirs
+    (out_dash_subdir, *_), *_ = out_subdirs, results_subdirs = subdirs
+    # N.B. first subdirectory used to assess whether to use out or results subdirectories
+
+    # select relevant output subdirectories
+    relelvant_subdirs = out_subdirs if not os.path.exists( out_dash_subdir ) else results_subdirs
+
+    # unpack individual relevant subdirectories
+    db_rdir, info_rdir = relelvant_subdirs
+    
+    # create relevant output subdirectories
+    try:
+        [ os.makedirs( subdir, exist_ok=True ) for subdir in relelvant_subdirs ]
+    
+    except OSError:
+        print(f'Error while creating result dirs in {OUT_DIR}')
+
+
+
+    # specify output file names
+    outputs = [ os.path.join( subdirectory, 
+                              f'{BAM_filename}{suffix}' )
+                for subdirectory, suffix in ( ( info_rdir, '.bed'                    ),
+                                              ( info_rdir, '_insert_coords.txt'      ),
+                                              ( db_rdir,   f'_countinfo.{OUT_FORMAT}') ) ]
+    
+    # specify countinfo output file
+    bed_file, coordinate_file, countinfo_file = outputs
+
+
+
+    # process gff
+    
+    GFF_info = {
+
+        1: { 'features':   ['CDS', 'tRNA', 'rRNA'],
+             'extras':     [*GFF_EXTRA],
+             'processed':  [],
+             'pseudogene': False },
+
+        2: { 'features':   ['pseudogene'],
+             'extras':     [],
+             'processed':  [],
+             'pseudogene': True } }
+
+
+    # specify standard gff annotation to report
+    gff_standard_fields = [ 'seq_id'      # standard
+                           ,'type'        # standard
+                           ,'start'       # standard
+                           ,'end'         # standard
+                    
+                           ,'feat_length' # added
+                           ,'product'     # added
+
+                           ,'ID'          # attribute
+                           ,'locus_tag'   # attribute
+                           ,'gene' ]      # attribute
+                
+    ##### ATTRIBUTES ARE INCONSISTENT ACCROSS GFFS! CANNOT GUARANTEE THEY EXIST
+
+
+    for key in GFF_info:
+
+        # specify gff identifier
+        GFF_filtered_identifier = '_pseudogene' if GFF_info[key]['pseudogene'] else ''
+
+        # specify filtered gff filename
+        GFF_filtered_name = f'{GFF_basename}_pimms_features{GFF_filtered_identifier}.gff'
+
+        # specify filtered
+        GFF_filtered_path = os.path.join( info_rdir, GFF_filtered_name )
+
+        # read in gff annotation
+        GFF_annotation = gffpd.read_gff3(GFF_PATH)
+
+        # filter gff annotation for relevant features
+        GFF_annotation = GFF_annotation.filter_feature_of_type( GFF_info[key]['features'] )
+
+        # write filtered gff to output        
+        GFF_annotation.to_gff3( GFF_filtered_path )
+
+        # convert filtered annotation to dataframe & split final attributes column into individual columns 
+        GFF_df = GFF_annotation.attributes_to_columns()
+        # N.B. indivudal attributes recorded only if relevant i.e. cell values if exists for entry otherwise 'None'
+
+        # filtering removed all rows (no relevant features)
+        if GFF_df.empty:
+
+            # columns; seq_id, source, type, start, end, score, strand, phase, attributes
+            GFF_info[key]['processed'].extend([GFF_df, GFF_df])
+        
+        else:
+
+            # create new column for feature length; difference between feature start & feature end
+            GFF_df = GFF_df.assign( feat_length=(GFF_df.end - GFF_df.start + 1) )
+
+            # remove columns if all blank values
+            # remove original attributes column; split columns for individual attributes retained
+            GFF_df = GFF_df.dropna( axis=1
+                                   ,how='all' ).drop(columns=['attributes'])
+
+            # create product column if absent
+            if not 'product' in GFF_df.columns:
+            
+                GFF_df['product'] = '-'
+            
+            else:
+                # you've just removed column if na so why fill?
+                GFF_df['product'] = GFF_df['product'].fillna('').astype(str).apply(ul.parse.unquote)  # added fix for None datatype
+
+
+            # fix to skip requested extra gff annotation field if not present in GFF
+            attributes_absent = [ attribute 
+                                  for attribute in GFF_info[key]['extras'] 
+                                  if not attribute in GFF_df.columns]
+
+            # remove missing extra gff attributes
+            if any(attributes_absent):
+
+                [ print(f'Warning: Attribute "{attribute}" absent in {GFF_PATH}. Removing.')
+                  for attribute in attributes_absent ]
+
+                GFF_info[key]['extras'] = [ attribute 
+                                              for attribute in GFF_info[key]['extras'] 
+                                              if not attribute in attributes_absent ]
+
+            attributes_duplicated = [ attribute 
+                                      for attribute in GFF_info[key]['extras'] 
+                                      if attribute in gff_standard_fields]
+
+            # remove extra gff attributes already in standard criteria
+            if any(attributes_duplicated):
+
+                [ print(f'Warning: Attribute "{attribute}" already in standard reporting criteria. Removing.')
+                  for attribute in attributes_duplicated ]
+
+                GFF_info[key]['extras'] = [ attribute 
+                                            for attribute in GFF_info[key]['extras'] 
+                                            if not attribute in gff_standard_fields ]
+
+
+            # Remove URL character encoding from attribute columns (skipping translation if present as this breaks the decoding
+            for attribute in GFF_info[key]['extras']:
+
+                if attribute != 'translation':
+                
+                    GFF_df[attribute] = GFF_df[attribute].fillna('').astype(str).apply(ul.parse.unquote)  # added fix for None datatype
+
+
+
+            # extract stanfard gff annotation fields plus any additional annotaiton fields provided
+            gff_columns_addback = GFF_df[ [*gff_standard_fields, *GFF_info[key]['extras']] ].copy()
+
+            # fill empty NaN values
+            gff_columns_addback.fillna('', inplace=True)
+            
+            GFF_info[key]['processed'].extend([ gff_columns_addback, GFF_df])
+
+    # extract processed gff info
+    gff_basic, gff_pseudo = [ GFF_info[key]['processed'] 
+                              for key in sorted(GFF_info.keys()) ]
+    
+    gff_columns_addback_basic,  attr_to_columns_basic  = gff_basic
+    gff_columns_addback_pseudo, attr_to_columns_pseudo = gff_pseudo
+
+
+
+
+
+
+    # check seqid consistancy
+    
+    # read in alignment file object
+    pysam_fo = pysam.AlignmentFile( BAM_PATH )
+
+    # extract bam header SQ lines
+    bam_header_SQ = pysam_fo.header['SQ']
+
+    # extract SN enteries from each SQ line (conform to string if integer)
+    bam_SNs = [ str(name['SN'])
+                for name in bam_header_SQ ]
+
+    bam_SNs.sort()
+
+    # extract gff seq ids (conform to string if integer)
+    gff_SNs = [ str(name) 
+                for name in gff_columns_addback.seq_id.unique() ]
+
+    gff_SNs.sort()
+
+    ##**
+    # check if gff and bam sequence IDs are the same or have an overlap
+    # if the same run, if an overlap stop and ask if GFF_FORCE should be used of if GFF_FORCE used continue
+    # if no overlap stop
+
+    SNs_intersection = set(bam_SNs).intersection(set(gff_SNs))
+
+    SNs_equal = set(bam_SNs) == set(gff_SNs)
+
+    if SNs_equal:
+
+        print('\nGFF and mapped reference sequence IDs match ... proceeding\n')
+
+    else:
+
+        if SNs_intersection:
+
+            print('\nWARNING: GFF & mapping reference sequence IDs are inconsistent')
+            print('\nGFF:')
+            print(*gff_SNs, sep=", ")
+            print('\nBam/Fasta:')
+            print(*bam_SNs, sep=", ")
+            print('\nOnly the following alignment sequence IDs are present both in the GFF and alignment supplied:')
+            print(*sorted(SNs_intersection), sep=", ")
+            # [ print(f'-{name}')
+            #   for name in sorted(SNs_intersection) ]
+
+            if GFF_FORCE:
+
+                print('\n\t** This sequence ID mismatch has been overridden by --gff_force ... proceeding\n')
+
+            else:
+                print('\nERROR: Exiting due to sequence ID mismatch\n')
+                print('NOTE: If this sequence ID mismatch is benign e.g. extra/missing minor contigs in the GFF/Fasta, override by using the --gff_force flag\n')
+                sys.exit(0)
+
+        else:
+            print('\nERROR: Exiting due to no matching sequence IDs')
+            print('\nGFF:')
+            print(*gff_SNs, sep=", ")
+            print('\nBam/Fasta:')
+            print(*bam_SNs, sep=", ")
+            print('\nNote: Unable to resolve sequence ID problem between the GFF and alignment - check you are using corresponding files\n')
+            sys.exit(0)
+
+
+        # # gff seq ids absent from bam header
+        # if not SNs_represented:
+        #
+        #     # extract missing gff seq ids
+        #     missing_SNs = set(gff_SNs).difference(set(bam_SNs))
+        #
+        #     print('\nWARNING: The following GFF sequence IDs are absent from the alignment file supplied:\n')
+        #
+        #     [ print(f'-{name}')
+        #       for name in sorted(missing_SNs) ]
+        #
+        #     # gff force flag supplied
+        #     if GFF_FORCE:
+        #
+        #         print('\nSequence ID mismatch will be overridden by --gff_force\n')
+        #
+        #     else:
+        #         print('EXITING: print some message here')
+        #         sys.exit(0)
+
+    ##### I EXPECT GFF FORCE WILL RESULT IN PROBLEMS IF GFF SEQ ID MISSING FROM BAM...
+    ##** end
+
+
+
+
+    # SAM PROCESSING
+
+    # read in alignment file object
+    pysam_fo = pysam.AlignmentFile( BAM_PATH )
+
+    # specify strand ids
+    strand = { 0: '+'
+              ,1: '-' }
+    
+    coordinate_delimiter = '\t'
+
+    print('# WRITING COORDINATES TO FILES...')
+    with open(bed_file,'w') as f, open(coordinate_file, 'w') as f2:
+
+        # specify coordinate output headers
+        coordinate_headers = [ 'ref_name'
+                              ,'coord'
+                              ,'strand'
+                              ,'read_name'
+                              ,'read_grp'
+                              ,'read_comment' ]
+        
+        # write headers to read coordinates file
+        print( *coordinate_headers,
+                sep  = coordinate_delimiter, 
+                file = f2 )
+
+        # cycle through alignments
+        for read in pysam_fo.fetch():
+
+            # skip unmapped reads
+            if read.is_unmapped:
+                continue
+
+            # process mapped reads
+            else:
+
+
+                # BED COORDINATES
+
+                # assign appropriate strand id 
+                read_strand = strand[int(read.is_reverse)]
+
+                # specify bed coordinates
+                read_bed = [ read.reference_name,
+                             read.pos,
+                             read.reference_end,
+                             '.',
+                             read.mapping_quality,
+                             read_strand,
+                             f'# {read.query_name}' ]  # read group added
+
+                # write bed coordinates to output
+                print( *read_bed, 
+                        sep  = coordinate_delimiter, 
+                        file = f )
+
+
+                # READ COORDINATES
+
+                # extract NM edit distance tag (i.e. number of differences) from alignment fields
+                ##### ACCORDING TO MANUAL "If the NM tag is not present, this field will always be 0."
+                ##@@ nm_value = read.get_tag('NM')
+                ##### HOW DOES THIS AFFECT CALCULATIONS? IS IT FILTERING DATA TOO AGGRESSIVELY?
+
+                ##@@ comment FRACTION MISMATCH check
+                # skip if fraction mismatch criteria supplied & reads have excessive mismatches
+                # if FRACTION_MISMATCH and (read.query_alignment_length * FRACTION_MISMATCH) > nm_value:
+                #     continue
+                # ##### originally 0 element of FRACTION_MISMATCH ( i suspect wrong - surely just the entire FRACTION_MISMATCH value - list already unpacked / float non-subscriptable )
+                # ##### also surely other way around i.e. nm_value > (read.query_alignment_length * FRACTION_MISMATCH)
+                # else:
+                ##@@ remove FRACTION MISMATCH check and make else code default
+                # specify relevant read coordinate according to strand
+                # read_coord = (read.reference_start + 4) if read_strand == '+' else (read.reference_end - 4)
+                ##@@ addition of target dup offset parameter default == 4
+                read_coord = (read.reference_start + TARGET_DUP_OFFSET) if read_strand == '+' else (read.reference_end - TARGET_DUP_OFFSET)
+
+                # specify read coordinate info
+                read_coords = [ read.reference_name,
+                                read_coord,
+                                read_strand,
+                                f'# {read.query_name}',
+                                ':'.join(read.query_name.split(':', 4)[:4]),
+                                read.get_tag("CO").split(":")[-1] ]  # add fq comment sample id number
+
+                # write read coordinate info to output
+                print( *read_coords,
+                        sep  = coordinate_delimiter,
+                        file = f2 )
+
+    print('# WRITING COORDINATES COMPLETED')
+    pysam_fo.close()
+
+
+
+
+
+    # COORDINATE TO FEATURES
+
+    # read coordinate file in as pandas dataframe
+    COORDINATES_df = pd.read_csv( coordinate_file,
+                                  sep   = coordinate_delimiter,
+                                  dtype = { 'ref_name'     : 'str',
+                                            'coord'        : 'int64',
+                                            'read_comment' : 'str',
+                                            'read_grp'     : 'str' } )
+
+    # bin reads by coordinate & count bin sizes
+    COORDINATES_BINNED_df = COORDINATES_df.groupby( by = ['ref_name', 'coord'] ).size().reset_index( name = 'counts' )
+
+    # calculate total insertion sites & total reads
+    number_of_insertion_sites = len(COORDINATES_BINNED_df)
+    number_of_reads_mapped    = COORDINATES_BINNED_df['counts'].sum()
+
+    # calculate minimum / maximum / median / mean read support at insertion sites
+    min_reads_at_site         = COORDINATES_BINNED_df['counts'].min()
+    max_reads_at_site         = COORDINATES_BINNED_df['counts'].max()
+    median_reads_at_site      = round(COORDINATES_BINNED_df['counts'].median(), 2)
+    mean_insertion_site_depth = round(number_of_reads_mapped / number_of_insertion_sites, 2)
+
+    # remove coordinates below specified depth
+    COORDINATES_BINNED_df.query( f' counts >= {MIN_DEPTH} ', inplace=True )
+
+    FILTERED_df = COORDINATES_BINNED_df.copy()
+
+    # insert additional data columns
+    FILTERED_df.eval(
+        f''' 
+        source       = "pimms2"
+        feature_type = "misc_feature"
+        strand       = "."
+        phase        = "."
+        score        =  counts
+        start        =  coord
+        stop         =  coord
+        info         = "note=insertion;"
+        ''', inplace=True)
+
+    # specify gff coordinates path
+    gff_coordinates = os.path.join( db_rdir, 
+                                    f'{RESULTS_LABEL}_pimms_insert_coordinates.gff')
+
+    # specify relevant columns
+    relevant_columns = [ 'ref_name',
+                         'source',
+                         'feature_type',
+                         'start',
+                         'stop',
+                         'score',
+                         'strand',
+                         'phase',
+                         'info' ]
+
+    # write gff coordinates to output
+    FILTERED_df[ [ *relevant_columns ] ].to_csv( gff_coordinates, 
+                                                 index  = False,
+                                                 sep    = coordinate_delimiter, 
+                                                 header = False )
+
+    # calculate gap size between insert sites within same ref_name
+    COORDINATES_BINNED_df['between_insertion_gap'] = COORDINATES_BINNED_df.groupby( by='ref_name' )['coord'].diff()
+
+    # calculate minimum / maximum / median / mean gap size between insertion sites
+    min_between_insertion_gap    = COORDINATES_BINNED_df['between_insertion_gap'].min()
+    max_between_insertion_gap    = COORDINATES_BINNED_df['between_insertion_gap'].max()
+    median_between_insertion_gap = COORDINATES_BINNED_df['between_insertion_gap'].median()
+    mean_between_insertion_gap   = round(COORDINATES_BINNED_df['between_insertion_gap'].mean(), 2)
+    
+    # specify sql to extract standard gff attributes
+    sqlcode = '''
+        select COORDINATES_BINNED_df.*
+        ,attr_to_columns_basic.*
+        from attr_to_columns_basic
+        left join COORDINATES_BINNED_df
+        on COORDINATES_BINNED_df.coord between attr_to_columns_basic.start and attr_to_columns_basic.end
+        where COORDINATES_BINNED_df.ref_name like '%' || attr_to_columns_basic.seq_id || '%'
+        '''
+    # N.B. wierd sqlite concatenation + >> || ,  '%' == wildcard double check effect of this
+    # this line should allow multi contig files
+
+    # extract relevant gff features near insertion sites
+    COORDINATES_GFF_df = ps.sqldf(sqlcode, locals())
+    
+    # calculate forward strand position percentile
+    posn_as_percentile_neg = ( ( COORDINATES_GFF_df.coord - COORDINATES_GFF_df.start ) + 1 ) / ( COORDINATES_GFF_df.feat_length / 100 )
+
+    # calculate reverse strand position percentile
+    posn_as_percentile_pos = ( ( COORDINATES_GFF_df.end   - COORDINATES_GFF_df.coord ) + 1 ) / ( COORDINATES_GFF_df.feat_length / 100 )
+
+    # select relevant positions percentile according to strand orientation
+    COORDINATES_GFF_df['posn_as_percentile'] = posn_as_percentile_neg.where( cond  = COORDINATES_GFF_df.strand == '+',
+                                                                             other = posn_as_percentile_pos ).round( decimals = 1 )
+
+    # Important fix group by doesn't work -- any rows with nan values get dropped *yikes very bad!!!!*
+    COORDINATES_GFF_df.fillna( value   = '', 
+                            inplace = True )
+
+    # groupby gff fields (filtered to remove absent & duplicate extra fields) & calculate summary metrics
+    pimms_result_table = COORDINATES_GFF_df.groupby( [ *gff_columns_addback_basic.columns ] ).agg( num_insertions_mapped_per_feat  = ( 'counts',             'sum'   ),
+                                                                                                   num_insert_sites_per_feat       = ( 'counts',             'count' ),
+                                                                                                   first_insert_posn_as_percentile = ( 'posn_as_percentile', 'min'   ),
+                                                                                                   last_insert_posn_as_percentile  = ( 'posn_as_percentile', 'max'   ) ).reset_index()
+
+    # calculate additional summary metrics
+    pimms_result_table.eval(
+        f'''
+         num_insert_sites_per_feat_per_kb = ( num_insert_sites_per_feat      /   feat_length ) * 1000
+         NRM_score                        = ( num_insertions_mapped_per_feat / ( feat_length   / 1000 ) ) / ( {number_of_reads_mapped} / 1e6 )
+         NIM_score                        = ( num_insert_sites_per_feat      / ( feat_length   / 1000 ) ) / ( {number_of_reads_mapped} / 1e6 )
+         ''', inplace=True)
+
+    pimms_result_table = pimms_result_table.round({ 'num_insert_sites_per_feat_per_kb' : 2,
+                                                    'NRM_score'                        : 2,
+                                                    'NIM_score'                        : 2 })
+
+    # extract metric columns
+    metric_columns = set(pimms_result_table.columns).difference(set(gff_columns_addback_basic.columns))
+
+    # get insertion metric column names
+    if RESULTS_LABEL:
+        
+        # add prefix to metric columns
+        renamed_columns = { column: f'{RESULTS_LABEL}_{column}' 
+                            for column in metric_columns }
+
+        # rename metric columns
+        pimms_result_table.rename( columns = renamed_columns,
+                                   inplace = True)
+    
+        # update metric columns
+        metric_columns = [ column 
+                           for column in renamed_columns.values() ]
+    
+    # merge insertion metrics into previous dataframe
+    pimms_result_table_full = pd.merge( left  = gff_columns_addback_basic, 
+                                        right = pimms_result_table, 
+                                        how   = 'left'  )
+
+    # fill empty values where insertion metrics absent
+    pimms_result_table_full.fillna( value   = { metric: int(0)
+                                                for metric in metric_columns }, 
+                                    inplace = True )
+
+
+
+    # COORDINATES -> FEATURES (REPS)
+
+    if SKIP_REPS:
+        
+        print("not processing read groups as replicates\n")
+
+    else:
+        
+        print("processing read groups as replicates for illumina data\n")
+
+        # extract unique read groups from coordinates file
+        read_grps = sorted(COORDINATES_df.read_grp.unique())
+        print(f'\n{len(read_grps)} readgroups found:')
+        [ print(f'-{group}') for group in read_grps ]
+
+        # extract unique read comments from coordinates file
+        read_comments = sorted(COORDINATES_df.read_comment.unique())
+
+        ##**
+        # fix to override reps if many comments found due to poor parsing of old solexa style fastq header lines
+        if (len(read_comments) > 12):
+            print("not processing read groups as replicates\n")
+            print("Warning: Unable to resolve different samples in fastq/sam/bam data (apparently too many?), continuing without replicates")
+            print("Note: This may be due to old style Illumina header lines")
+            pool_comment_criteria = False
+            pool_group_criteria = False
+
+        else:
+            print(f'\n{len(read_comments)} sample comments found:')
+            [ print(f'-{comment}') for comment in read_comments ]
+
+            # specify respective pooling criteria
+            pool_comment_criteria = (len(read_grps) < len(read_comments)) & (len(read_comments) >= 3)
+
+            pool_group_criteria   = (len(read_grps) >= len(read_comments)) & (len(read_grps)     >= 3) ##**  # change to capture if number of read_grps amd read_comments is same
+        ##** end
+
+        # skip replicates        
+        if not pool_comment_criteria and not pool_group_criteria:
+
+            print('\nWarning: Unable to resolve >= 3 samples in fastq/sam/bam data, continuing without replicate insertion counts')
+            print('N.B: If this is an error the software may need updating to recognise novel fastq naming conventions')
+        
+        # pool replicates
+        else:
+
+            # set read comments for pooling
+            if pool_comment_criteria:
+                
+                field_drop   = 'read_grp'
+                field_pool   = 'read_comment'
+                field_unique = read_comments
+
+
+            # set read groups for pooling
+            elif pool_group_criteria:
+
+                field_drop   = 'read_comment'
+                field_pool   = 'read_grp'
+                field_unique = read_grps
+
+            # drop irrelevant column
+            COORDINATES_df.drop( labels  = field_drop, 
+                                 axis    = 1,
+                                 inplace = True)
+
+            # rename column for pooling
+            COORDINATES_df.rename( columns = { field_pool: 'sample_info' },
+                                   inplace = True )
+
+            # calculate pool sizes
+            COORDINATES_df = COORDINATES_df.groupby( by = ['ref_name', 'coord', 'sample_info'] ).size().reset_index( name = RESULTS_LABEL )
+            
+            # report pool counts
+            ##### REALLY!?!?! SURELY MORE BECAUSE INLUCDING REF_NAME & COORD IN GROUPBY (I.E. MORE UNIQUE COMBINATIONS OF REF_NAME + COORD + SAMPLE_INFO)
+            print(f'{len(field_unique)} sample replicates/mutant pools established')
+            ##### SUBSTITUTE WITH DATAFRAME LENGTH?
+            
+            # reshape dataframe with pool size columns for each unique sample_info
+            COORDINATES_df = COORDINATES_df.copy( deep=False ).pivot_table( index      = [ 'ref_name', 'coord' ],
+                                                                            columns    = [ 'sample_info' ],
+                                                                            values     = [ RESULTS_LABEL ],
+                                                                            fill_value = 0 ).reset_index()
+            
+            # replace sample_info names with numerical labels
+            COORDINATES_df.rename( columns = { name : f'MP{i}' 
+                                               for i, name in enumerate(field_unique,1) }, 
+                                   inplace = True )
+            
+            # flatten column indexes with hiererchial label included as prefix
+            COORDINATES_df.columns = [ '_'.join(col).rstrip('_ ')
+                                             for col in COORDINATES_df.columns.to_flat_index() ]
+
+            sqlcode = '''
+                select COORDINATES_df.*
+                ,attr_to_columns_basic.seq_id
+                ,attr_to_columns_basic.start
+                ,attr_to_columns_basic.end
+                from attr_to_columns_basic
+                left join COORDINATES_df
+                on COORDINATES_df.coord between attr_to_columns_basic.start and attr_to_columns_basic.end
+                where COORDINATES_df.ref_name like '%' || attr_to_columns_basic.seq_id || '%'
+                '''
+
+            # wierd sqlite concatenation + >> || ,  '%' == wildcard double check effect of this
+            # this line should allow multi contig files
+
+            # extract relevant gff features near insertion sites
+            COORDINATES_GFF_df = ps.sqldf(sqlcode, locals())
+
+            # remove ref_name & coord columns
+            COORDINATES_GFF_df.drop(labels  = ['ref_name','coord'],
+                                    axis    = 1, 
+                                    inplace = True)
+
+            # groupby by gff feature coordinates & sum
+            COORDINATES_GFF_df = COORDINATES_GFF_df.groupby(['seq_id', 'start', 'end']).sum().reset_index()
+
+            # merge feature metrics into previous dataframe
+            pimms_result_table_full = pd.merge( left  = pimms_result_table_full, 
+                                                right = COORDINATES_GFF_df, 
+                                                on  = ["seq_id", "start", "end"],
+                                                how   = 'left' )
+
+            # fill empty values where feature metrics absent
+            pimms_result_table_full.fillna( value   = { metric: int(0)
+                                                        for metric in COORDINATES_GFF_df.columns
+                                                        if metric.startswith(RESULTS_LABEL) }, 
+                                            inplace = True )
+
+
+    # pseudogene features present
+    if not gff_columns_addback_pseudo.empty:
+    
+
+        # extract pseudogene features
+        pseudo_entries = pimms_result_table_full.locus_tag.isin(gff_columns_addback_pseudo['locus_tag'])
+
+        # tag feature type to indicuate pseudogene
+        pimms_result_table_full.loc[pseudo_entries, "type"] = pimms_result_table_full['type'] + '_pseudo'
+
+
+    # detect output mode from provided extension
+    output_modes = [ OUT_FORMAT == extension 
+                    for extension in ('xlsx', 'csv', 'tsv') ]
+
+    xlsx_mode, csv_mode, tsv_mode = output_modes
+
+    # write countinfo outputs
+
+    if xlsx_mode:
+
+        writer = pd.ExcelWriter( countinfo_file, 
+                                 engine='xlsxwriter' )
+        
+        # Convert the dataframe to an XlsxWriter Excel object.
+        pimms_result_table_full.to_excel( writer, 
+                                          sheet_name='PIMMS2_result', 
+                                          index=False )
+
+        # Close the Pandas Excel writer and output the Excel file.
+        writer.save()
+
+    if csv_mode:
+
+        pimms_result_table_full.to_csv( countinfo_file, 
+                                        index=False, 
+                                        sep=',' )
+
+    if tsv_mode:
+
+        pimms_result_table_full.to_csv( countinfo_file, 
+                                        index=False, 
+                                        sep='\t' )
+
+
+
+
+
+
+
+
+
+
+#######################
+# TABLE_MERGE COMMAND #
+#######################
+
+if MODE_SELECTED == TABLE_MERGE:
+    
+    # filter absent input tables
+    input_tables = [ inputs
+                     for inputs in [ parsed_args[0].xlsx
+                                    ,parsed_args[0].csv
+                                    ,parsed_args[0].tsv ]
+                     if inputs ]
+
+    # decide whether to proceed with merging tables
+    if not input_tables:
+        print("\nERROR: Result tables absent for merging\n")
+    else:
+
+        # unpack present input tables
+        (table1, table2), = input_tables, = input_tables
+
+        print(f'Merging:')
+        [ print(f'\t-{table}') for table in input_tables ]
+
+        # detect merge mode from table extension
+        merge_modes = [ all( table.endswith(extension) 
+                             for table in input_tables ) 
+                        for extension in ('xlsx', 'csv', 'tsv') ]
+
+        xlsx_mode, csv_mode, tsv_mode = merge_modes
+
+
+    # READ INPUTS
+
+        # convert to pandas dataframe
+        if xlsx_mode:
+
+            result_dfs = [ pd.read_excel(table, engine="openpyxl")
+                           for table in input_tables ]
+            
+        if csv_mode:
+
+            result_dfs = [ pd.read_csv(table).replace('"', '', regex=True)
+                           for table in input_tables ]
+
+        if tsv_mode:
+
+            result_dfs = [ pd.read_csv(table, sep="\t")
+                           for table in input_tables ]
+
+
+    # MERGE TABLES
+
+        # extract individual dataframes
+        df1, df2 = result_dfs
+
+        # merge pandas dataframes 
+        merged_dfs = pd.DataFrame.merge( left=df1
+                                       , right=df2 )
+            
+
+    # WRITE OUTPUTS
+
+        if xlsx_mode:
+
+            writer = pd.ExcelWriter('merged_result.xlsx', engine='xlsxwriter')
+            # Convert the dataframe to an XlsxWriter Excel object.
+            merged_dfs.to_excel(writer, sheet_name='PIMMS2_merged_result', index=False)
+            # Close the Pandas Excel writer and output the Excel file.
+            writer.save()
+            
+        if csv_mode:
+
+            merged_dfs.to_csv('merged_result.csv', index=False, sep=',')
+        
+        if tsv_mode:
+            
+            merged_dfs.to_csv('merged_result.txt', index=False, sep="\t")
