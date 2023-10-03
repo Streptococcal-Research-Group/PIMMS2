@@ -4,6 +4,6 @@ fuzzysearch==0.7.0
 gffpandas==1.2.0
 pandasql==0.7.3
 pysam==0.19.0
-urllib3==1.26.5
+urllib3==1.26.17
 XlsxWriter==1.2.1
 bwa
