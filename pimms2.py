@@ -289,7 +289,7 @@ for subparser in [ samcoords
     subparser.add_argument("--min_depth", 
                            required = False, 
                            type     = int, 
-                           default  = 2, 
+                           default  = 3, 
                            metavar  = 'int',
                            help     = "minimum read depth at insertion site >= int [2]")
 
