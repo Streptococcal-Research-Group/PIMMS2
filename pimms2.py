@@ -2048,7 +2048,7 @@ if MODE_SELECTED == TABLE_MERGE:
         df1, df2 = result_dfs
 
         # merge pandas dataframes 
-        merged_dfs = pd.DataFrame.merge( left=df1
+        merged_dfs = pd.merge( left=df1
                                        , right=df2 )
             
 
