@@ -40,5 +40,6 @@ dependencies:
       - typing-extensions==4.2.0
       - xlsxwriter==3.0.3
       - zipp==3.8.0
+      - openpyxl==3.1.3
 
 
